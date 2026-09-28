@@ -1,0 +1,14 @@
+# Build cache and outputs
+build/*
+dist/*
+
+# Go
+vendor/
+
+# IDE / tools
+.claude/
+*.exe
+*.swp
+*.swo
+*~
+.DS_Store
