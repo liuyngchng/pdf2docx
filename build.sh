@@ -125,6 +125,7 @@ docker run --rm \
   -e GOOS=windows \
   -e GOARCH=amd64 \
   -e CC=x86_64-w64-mingw32-gcc \
+	  -e CGO_LDFLAGS="-lucrt" \
   "$IMAGE" \
   bash -c "
     go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
