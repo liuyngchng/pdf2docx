@@ -8,11 +8,13 @@ IMAGE="pdf2docx_build:1.0"
 HTTP_PROXY_VAL=""
 HTTPS_PROXY_VAL=""
 NO_PROXY_VAL=""
+GO_BUILD_X=""   # set to "-x" when verbose is requested
 for arg in "$@"; do
   case "$arg" in
     http_proxy=*|HTTP_PROXY=*)   HTTP_PROXY_VAL="${arg#*=}" ;;
     https_proxy=*|HTTPS_PROXY=*) HTTPS_PROXY_VAL="${arg#*=}" ;;
     no_proxy=*|NO_PROXY=*)       NO_PROXY_VAL="${arg#*=}" ;;
+    -x|verbose)                  GO_BUILD_X="-x" ;;
     *) ;;
   esac
 done
@@ -106,7 +108,7 @@ docker run --rm \
   -e GOARCH=amd64 \
   "$IMAGE" \
   bash -c "
-    go build -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
+    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx
   "
 
@@ -125,7 +127,7 @@ docker run --rm \
   -e CC=x86_64-w64-mingw32-gcc \
   "$IMAGE" \
   bash -c "
-    go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
+    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx.exe
   "
 

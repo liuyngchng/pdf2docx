@@ -1,0 +1,17 @@
+# Docker 构建上下文里只需要 build/deps 下的 Go 工具链 tarball
+# （Dockerfile 里唯一 COPY 的文件）。其余要么是运行期 volume 挂载的
+# 缓存目录，要么是产物/源码，都不该进构建上下文。
+
+.git
+.claude
+
+# 编译缓存（运行期通过 -v 挂载，无需打包进上下文）
+build/gocache
+build/gomodcache
+
+# 构建产物
+dist
+
+# 其余 build 子目录中的非 tarball 文件
+build/deps/*
+!build/deps/go*.tar.gz
