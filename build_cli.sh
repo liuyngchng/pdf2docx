@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ────────────────────────────────────────────────────────────────
+# Build the GUI client binaries (Linux + Windows).
+#   ./build_cli.sh
+# ────────────────────────────────────────────────────────────────
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="pdf2docx_build:1.0"
 
@@ -74,8 +79,7 @@ else
   echo "Go toolchain tarball ready: $GO_TARBALL"
 fi
 
-# ── Build Docker image if go.mod changed ─────────────────────────
-# docker build cache handles unchanged layers (base stays cached).
+# ── Build Docker image if missing ────────────────────────────────
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building Docker image $IMAGE ..."
   docker build "${DOCKER_BUILD_ARGS[@]}" --build-arg "GO_VERSION=$GO_VERSION" -t "$IMAGE" -f Dockerfile .
@@ -89,14 +93,13 @@ COMMON_ENV=(
   -e GOCACHE=/tmp/gocache
   -e GOMODCACHE=/go/pkg/mod
   -e GOPROXY="https://goproxy.cn,direct"
-  -e CGO_ENABLED=1
   -e HOST_UID="$(id -u)"
   -e HOST_GID="$(id -g)"
 )
 
-# ── 1. Linux binary ─────────────────────────────────────────────
+# ── 1. Linux GUI ─────────────────────────────────────────────────
 echo ""
-echo "=== Building pdf2docx (Linux) ==="
+echo "=== Building pdf2docx (Linux GUI) ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -104,6 +107,7 @@ docker run --rm \
   -w /workspace \
   "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  -e CGO_ENABLED=1 \
   -e GOOS=linux \
   -e GOARCH=amd64 \
   "$IMAGE" \
@@ -112,9 +116,9 @@ docker run --rm \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx
   "
 
-# ── 2. Windows .exe ─────────────────────────────────────────────
+# ── 2. Windows GUI ───────────────────────────────────────────────
 echo ""
-echo "=== Building pdf2docx.exe (Windows) ==="
+echo "=== Building pdf2docx.exe (Windows GUI) ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -122,10 +126,11 @@ docker run --rm \
   -w /workspace \
   "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  -e CGO_ENABLED=1 \
   -e GOOS=windows \
   -e GOARCH=amd64 \
   -e CC=x86_64-w64-mingw32-gcc \
-	  -e CGO_LDFLAGS="-lucrt" \
+  -e CGO_LDFLAGS="-lucrt" \
   "$IMAGE" \
   bash -c "
     go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
@@ -134,7 +139,7 @@ docker run --rm \
 
 echo ""
 echo "=== Build complete ==="
-echo "  Linux:   dist/pdf2docx    ($(du -h "$SCRIPT_DIR/dist/pdf2docx" | cut -f1))"
-echo "  Windows: dist/pdf2docx.exe  ($(du -h "$SCRIPT_DIR/dist/pdf2docx.exe" | cut -f1))"
+echo "  Linux GUI:    dist/pdf2docx      ($(du -h "$SCRIPT_DIR/dist/pdf2docx" | cut -f1))"
+echo "  Windows GUI:  dist/pdf2docx.exe  ($(du -h "$SCRIPT_DIR/dist/pdf2docx.exe" | cut -f1))"
 echo ""
 echo "Both are standalone; no external DLLs / .so required."
