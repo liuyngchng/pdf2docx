@@ -51,11 +51,32 @@ GOCACHE_DIR="$SCRIPT_DIR/build/gocache"
 GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
 mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
 
+# ── Go toolchain tarball (download if missing) ───────────────────
+GO_VERSION="1.24.13"
+GO_TARBALL="$SCRIPT_DIR/build/deps/go${GO_VERSION}.linux-amd64.tar.gz"
+GO_DOWNLOAD_URL="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+
+if [[ ! -f "$GO_TARBALL" ]]; then
+  mkdir -p "$(dirname "$GO_TARBALL")"
+  echo "Downloading Go ${GO_VERSION} toolchain ..."
+  if command -v curl &>/dev/null; then
+    curl -fL --retry 3 -o "$GO_TARBALL" "$GO_DOWNLOAD_URL"
+  elif command -v wget &>/dev/null; then
+    wget -O "$GO_TARBALL" "$GO_DOWNLOAD_URL"
+  else
+    echo "ERROR: neither curl nor wget found; cannot download Go toolchain"
+    exit 1
+  fi
+  echo "Go toolchain saved to $GO_TARBALL"
+else
+  echo "Go toolchain tarball ready: $GO_TARBALL"
+fi
+
 # ── Build Docker image if go.mod changed ─────────────────────────
 # docker build cache handles unchanged layers (base stays cached).
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building Docker image $IMAGE ..."
-  docker build "${DOCKER_BUILD_ARGS[@]}" -t "$IMAGE" -f Dockerfile .
+  docker build "${DOCKER_BUILD_ARGS[@]}" --build-arg "GO_VERSION=$GO_VERSION" -t "$IMAGE" -f Dockerfile .
   echo "Docker image $IMAGE built"
 else
   echo "Docker image $IMAGE ready"

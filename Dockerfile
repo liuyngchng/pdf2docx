@@ -1,7 +1,10 @@
 # ================================================================
 # pdf2docx build image.
-#   Layer 1: base    — system packages (rarely changes)
-#   Layer 2: go-deps — Go module cache (changes when go.mod changes)
+#   System packages + Go toolchain only.
+#
+# Go module cache is mapped from the host at build time via a volume
+# (see build.sh), so dependencies are never downloaded inside the image
+# and rebuilds stay fast.
 #
 # go-fitz bundles pre-built MuPDF static libs for ALL platforms
 # (linux/windows/darwin/…) so we do NOT need to compile MuPDF.
@@ -42,11 +45,5 @@ RUN tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOTOOLCHAIN=local
-
-# ── Pre-download Go modules (cached in a volume) ─────────────────
-# This layer can be rebuilt independently when go.mod changes.
-WORKDIR /workspace
-COPY go.mod go.sum ./
-RUN GOPROXY="https://goproxy.cn,direct" go mod download
 
 WORKDIR /workspace
