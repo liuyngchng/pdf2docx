@@ -124,7 +124,8 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 
 	// Convert.
 	convStart := time.Now()
-	docxPath, err := pdfconv.Convert(pdfTmp.Name(), func(pct float64) {
+	enableOCR := r.FormValue("ocr") == "true"
+	docxPath, err := pdfconv.Convert(pdfTmp.Name(), enableOCR, func(pct float64) {
 		// SSE progress could go here; for now we just log milestones.
 	})
 	convDuration := time.Since(convStart)

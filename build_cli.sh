@@ -3,7 +3,11 @@ set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────
 # Build the GUI client binaries (Linux + Windows).
-#   ./build_cli.sh
+#   ./build_cli.sh                 # no OCR (original behavior)
+#   ./build_cli.sh --with-ocr      # Linux GUI with OCR (needs OpenCV + onnxruntime)
+#
+# Windows OCR requires Windows onnxruntime/OpenCV libs (not yet vendored),
+# so the Windows build always uses -tags noocr (OCR checkbox disabled).
 # ────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,6 +19,7 @@ HTTPS_PROXY_VAL=""
 NO_PROXY_VAL=""
 GO_BUILD_X=""   # set to "-x" when verbose is requested
 OBFUSCATE=true
+WITH_OCR=false
 for arg in "$@"; do
   case "$arg" in
     http_proxy=*|HTTP_PROXY=*)   HTTP_PROXY_VAL="${arg#*=}" ;;
@@ -22,6 +27,7 @@ for arg in "$@"; do
     no_proxy=*|NO_PROXY=*)       NO_PROXY_VAL="${arg#*=}" ;;
     -x|verbose)                  GO_BUILD_X="-x" ;;
     --no-obfuscate)              OBFUSCATE=false ;;
+    --with-ocr)                  WITH_OCR=true ;;
     *) ;;
   esac
 done
@@ -82,9 +88,17 @@ else
 fi
 
 # ── Build Docker image if missing ────────────────────────────────
-# When obfuscating, also rebuild if the image predates garble.
+# When obfuscating or OCR is requested, rebuild the image.
 NEEDS_REBUILD=false
-if ! docker image inspect "$IMAGE" &>/dev/null; then
+if $WITH_OCR; then
+  # OCR build needs the dev image (includes opencv + g++)
+  IMAGE="pdf2docx_dev:latest"
+  if ! docker image inspect "$IMAGE" &>/dev/null; then
+    echo "Building dev image $IMAGE ..."
+    docker build "${DOCKER_BUILD_ARGS[@]}" -t "$IMAGE" -f Dockerfile.dev .
+    echo "Done."
+  fi
+elif ! docker image inspect "$IMAGE" &>/dev/null; then
   NEEDS_REBUILD=true
 elif $OBFUSCATE && ! docker run --rm "$IMAGE" command -v garble &>/dev/null; then
   NEEDS_REBUILD=true
@@ -108,7 +122,7 @@ COMMON_ENV=(
 )
 
 # ── Obfuscation toggle ────────────────────────────────────────────
-if $OBFUSCATE; then
+if $OBFUSCATE && ! $WITH_OCR; then
   BUILD_BIN="garble -literals"
   GARBLE_ENV=(-e GOGARBLE=pdftoword)
   OBF_LABEL=" (obfuscated)"
@@ -116,6 +130,16 @@ else
   BUILD_BIN="go"
   GARBLE_ENV=()
   OBF_LABEL=""
+fi
+
+# ── OCR tags (Linux only) ────────────────────────────────────────
+LINUX_OCR_TAGS=""
+if $WITH_OCR; then
+  LINUX_OCR_TAGS=""
+  LINUX_OBF=""
+else
+  LINUX_OCR_TAGS="-tags noocr"
+  LINUX_OBF=""
 fi
 
 # ── 1. Linux GUI ─────────────────────────────────────────────────
@@ -134,13 +158,36 @@ docker run --rm \
   -e GOARCH=amd64 \
   "$IMAGE" \
   bash -c "
-    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
+    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod ${LINUX_OCR_TAGS} -ldflags='-s -w' -o dist/pdf2docx . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx
   "
+
+# Bundle libonnxruntime.so + OpenCV libs for OCR builds.
+if $WITH_OCR; then
+  cp "$SCRIPT_DIR/build/deps/onnxruntime/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
+  echo "  bundled:  dist/libonnxruntime.so"
+
+  # Copy OpenCV shared libs (and tbb, their only host-missing dep) from the
+  # dev image into dist/. The binary is linked with -Wl,-rpath,'$ORIGIN' so it
+  # finds them next to itself; the copied .so files get the same rpath so their
+  # own transitive deps (e.g. libtbb) also resolve from dist/.
+  docker run --rm -v "$SCRIPT_DIR":/workspace -w /workspace "$IMAGE" bash -c '
+    set -euo pipefail
+    LIBDIR=/usr/lib/x86_64-linux-gnu
+    mkdir -p /workspace/dist
+    for lib in libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12; do
+      cp -L "$LIBDIR/$lib" /workspace/dist/
+      patchelf --set-rpath "\$ORIGIN" "/workspace/dist/$lib"
+      echo "  bundled:  dist/$lib"
+    done
+    chown "$(id -u)":"$(id -g)" /workspace/dist/libopencv_*.so.406 /workspace/dist/libtbb.so.12
+  '
+fi
 
 # ── 2. Windows GUI ───────────────────────────────────────────────
 echo ""
 echo "=== Building pdf2docx.exe (Windows GUI)${OBF_LABEL} ==="
+# Windows always builds without OCR (no vendored win deps yet).
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -156,7 +203,7 @@ docker run --rm \
   -e CGO_LDFLAGS="-lucrt" \
   "$IMAGE" \
   bash -c "
-    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
+    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -tags noocr -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx.exe
   "
 

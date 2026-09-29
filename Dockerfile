@@ -26,7 +26,7 @@ RUN if [ -n "$HTTP_PROXY" ]; then \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build essentials
-    ca-certificates gcc libc6-dev pkg-config git \
+    ca-certificates gcc g++ libc6-dev pkg-config git \
     # MinGW-w64 (Windows cross-compilation)
     gcc-mingw-w64-x86-64 \
     # Fyne: OpenGL rendering
@@ -36,6 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxxf86vm-dev \
     # Fyne: Wayland
     libwayland-dev wayland-protocols libxkbcommon-dev \
+    # OCR: OpenCV
+    libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Go toolchain (from host-cached tarball) ──────────────────────

@@ -1,0 +1,8 @@
+# ================================================================
+# Dev container image: pdf2docx build image + OpenCV for OCR.
+# ================================================================
+FROM pdf2docx_build:1.0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    g++ libopencv-dev patchelf \
+    && rm -rf /var/lib/apt/lists/*

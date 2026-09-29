@@ -1,9 +1,13 @@
 // Command cli is a headless PDF → Word converter used for testing and
 // validating the pure-Go rendering pipeline without the Fyne GUI.
 //
-// Build (no CGO, no external deps):
+// Build (requires CGO for OCR support):
 //
-//	CGO_ENABLED=0 go build -o pdftoword-cli ./cmd/cli/
+//	CGO_ENABLED=1 go build -o pdftoword-cli ./cmd/cli/
+//
+// Or without OCR:
+//
+//	CGO_ENABLED=0 go build -tags noocr -o pdftoword-cli ./cmd/cli/
 package main
 
 import (
@@ -15,14 +19,27 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli <pdf_file>\n")
+		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli [--ocr] <pdf_file>\n")
 		os.Exit(1)
 	}
 
-	pdfPath := os.Args[1]
-	fmt.Printf("Converting: %s\n", pdfPath)
+	enableOCR := false
+	var pdfPath string
+	for _, arg := range os.Args[1:] {
+		if arg == "--ocr" {
+			enableOCR = true
+		} else {
+			pdfPath = arg
+		}
+	}
+	if pdfPath == "" {
+		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli [--ocr] <pdf_file>\n")
+		os.Exit(1)
+	}
 
-	docxPath, err := pdfconv.Convert(pdfPath, func(pct float64) {
+	fmt.Printf("Converting: %s (OCR: %v)\n", pdfPath, enableOCR)
+
+	docxPath, err := pdfconv.Convert(pdfPath, enableOCR, func(pct float64) {
 		const barWidth = 40
 		filled := int(pct * float64(barWidth))
 		bar := ""

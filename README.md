@@ -2,6 +2,17 @@
 
 将 PDF 逐页渲染为图片，并嵌入 Word 文档的桌面工具。适合在 Word 中像翻页一样逐页阅读 PDF 内容（尤其是扫描件）。
 
+**新功能**：可选 OCR 扩展——启用后同时生成一份纯文字版 `.ocr.docx`，方便搜索和复制文本。
+
+## 运行环境要求
+
+| 模式 | 依赖 |
+|------|------|
+| 基础版（截图 DOCX） | 无额外依赖，静态二进制 |
+| OCR 版（截图 + 文字 DOCX） | `libopencv_core`、`libopencv_imgproc`（系统安装或随发行版附带） + 同目录下的 `libonnxruntime.so` 和 `models/` 模型文件 |
+
+OCR 版启动后，如果 GUI 检测到 `models/` 目录（含 `det/inference.onnx`、`rec/inference.onnx`、`rec/inference.yml`），则出现"生成 OCR 文字版"复选框；如果未检测到，复选框灰掉，行为等同于基础版。
+
 ## 技术栈
 
 | 组件 | 选型 | 说明 |
@@ -9,26 +20,34 @@
 | GUI | [Fyne](https://fyne.io/) v2 | Go 原生 GUI 框架 |
 | PDF 渲染 | [go-fitz](https://github.com/gen2brain/go-fitz) (MuPDF) | 工业级 PDF 引擎，支持所有 PDF 版本，文字+图片+矢量全渲染 |
 | Word 生成 | 手写 OOXML（标准库 `archive/zip` + `encoding/xml`） | 无外部依赖，输出标准 .docx |
+| OCR 检测 | ONNX Runtime + OpenCV | 运行 PaddleOCR DB-Net 文本检测模型 |
+| OCR 识别 | ONNX Runtime | 运行 PaddleOCR CRNN 文字识别模型，CTC 解码 |
 
 ## 编译
 
 ### 前置条件
 
 - Docker（编译环境全部容器化，本机无需 Go）
-- Go 工具链 tarball：放到 `build/deps/go1.24.13.linux-amd64.tar.gz`（`build.sh` 自动复制 Dockerfile 引用，首次需手动下载）
+- Go 工具链 tarball：放到 `build/deps/go1.24.13.linux-amd64.tar.gz`（`build_cli.sh` 首次会自动下载）
 
 ### 一键编译
 
 ```bash
+# 基础版（无 OCR 依赖，静态链接）
 ./build_cli.sh
+
+# OCR 版（需 libopencv-dev，动态链接 opencv）
+./build_cli.sh --with-ocr
 ```
 
-产出 `dist/` 下两个文件：
+产出 `dist/` 下：
 
 | 文件 | 平台 | 说明 |
 |------|------|------|
-| `pdf2docx` | Linux amd64 | 独立二进制 |
-| `pdf2docx.exe` | Windows amd64 | 无外部 DLL 依赖，双击运行 |
+| `pdf2docx` | Linux amd64 | GUI 桌面版 |
+| `pdf2docx.exe` | Windows amd64 | GUI 桌面版（Windows 暂不支持 OCR） |
+| `pdf2docx-server` | Linux amd64 | HTTP 服务端 |
+| `libonnxruntime.so` | Linux amd64 | OCR 版附带（`--with-ocr` 时产出） |
 
 构建默认使用 [garble](https://github.com/burrowers/garble) 对模块内代码做符号名和字符串字面量混淆（依赖不变）。如果不需要混淆：
 
@@ -36,37 +55,122 @@
 ./build_cli.sh --no-obfuscate
 ```
 
-如果需要代理访问外网：
+通过代理访问外网：
 
 ```bash
 ./build_cli.sh http_proxy=http://proxy:8080 https_proxy=http://proxy:8080
 ```
 
-### 纯 Go 核心逻辑测试（可选）
-
-核心转换流程可以用命令行版本测试，无需 GUI、无需 CGO：
+### Server 编译
 
 ```bash
-CGO_ENABLED=0 go build -o pdf2docx-cli ./cmd/cli/
-./pdf2docx-cli /path/to/input.pdf
+# 纯 Go 命令行版本（CGO_ENABLED=0，无 OCR，静态链接）
+CGO_ENABLED=0 go build -tags noocr -o pdf2docx-cli ./cmd/cli/
+
+# 带 OCR 的命令行版本（CGO_ENABLED=1）
+CGO_ENABLED=1 go build -o pdf2docx-cli ./cmd/cli/
 ```
+
+Server：
+
+```bash
+# 静态版本（无 OCR）
+./build_server.sh
+
+# 带 OCR
+./build_server.sh --with-ocr
+```
+
+## 开发环境搭建
+
+开发容器基于 `ubuntu:24.04`，已预装 Go 1.24.13、gcc/g++、OpenCV 4.6、ONNX Runtime 头文件和库。
+
+```bash
+# 首次：构建开发镜像（或直接用 ./build_cli.sh --with-ocr 自动构建）
+docker build -t pdf2docx_dev:latest -f Dockerfile.dev .
+
+# 进入开发容器
+./dev.sh
+
+# 容器内可执行：
+go build ./internal/ocr/          # 编译 OCR 包
+go build -o dist/pdf2docx .       # 编译 GUI
+go vet ./internal/...             # 静态检查
+```
+
+### 开发容器内依赖
+
+| 组件 | 版本 | 来源 |
+|------|------|------|
+| ONNX Runtime | 1.27.1 | `build/deps/onnxruntime/`（已 vendor 头文件 + libonnxruntime.so） |
+| OpenCV | 4.6 | `apt-get install libopencv-dev`（Dockerfile 自动安装） |
+| Go | 1.24.13 | 基础镜像预装 |
+
+### 模型准备
+
+OCR 需要 PaddleOCR 的 ONNX 模型。放到可执行文件同级的 `models/` 目录下：
+
+```
+models/
+├── det/
+│   └── inference.onnx       # 文本检测模型（DB-Net）
+└── rec/
+    ├── inference.onnx        # 文字识别模型（CRNN）
+    └── inference.yml         # 字符集配置
+```
+
+模型来源于 PaddleOCR 的 ONNX 导出，可从 Android 版 `rd_app` 的 `app/src/main/assets/models/` 目录复制。
 
 ## 使用
 
-1. 双击 `pdf2docx.exe`（Windows）或运行 `./pdf2docx`（Linux）
-2. 弹出文件选择对话框，选一个 PDF 文件
-3. 等待转换完成（进度条显示页码进度）
-4. 在同目录下生成同名的 `.docx` 文件，用 Word / WPS 打开即可
+### GUI
+
+1. 运行 `./pdf2docx`（Linux）或 `pdf2docx.exe`（Windows）
+2. 弹出文件选择对话框，选一个或多个 PDF 文件
+3. （可选）勾选"生成 OCR 文字版"复选框
+4. 点击"开始转换"
+5. 同目录下生成 `.docx` 文件（或额外 `.ocr.docx` 文字版），用 Word / WPS 打开
+
+### CLI
+
+```bash
+# 基础转换
+./pdf2docx-cli input.pdf
+
+# 带 OCR
+./pdf2docx-cli --ocr input.pdf
+```
+
+### Server
+
+```bash
+# 启动服务
+PORT=8080 ./pdf2docx-server
+
+# 基础转换
+curl -X POST http://localhost:8080/convert \
+  -F "file=@input.pdf" \
+  -o output.docx
+
+# 带 OCR 文字版
+curl -X POST http://localhost:8080/convert \
+  -F "file=@input.pdf" \
+  -F "ocr=true" \
+  -o output.docx
+```
 
 ## 编译原理
 
 ```
 ubuntu:24.04
-  └─ 安装 gcc + MinGW-w64 + X11/GL/Wayland 开发头文件 + Go toolchain
+  └─ 安装 gcc + g++ + MinGW-w64 + X11/GL/Wayland 开发头文件
+       + libopencv-dev + Go toolchain
        └─ go mod download（模块缓存，挂载外部 volume 复用）
             ├─ CGO_ENABLED=1 GOOS=linux   → pdf2docx（ELF）
+            │     └─ 链接 libopencv_core + libopencv_imgproc + libonnxruntime
             └─ CGO_ENABLED=1 GOOS=windows
                CC=x86_64-w64-mingw32-gcc  → pdf2docx.exe（PE32+）
+               （Windows 版使用 -tags noocr，不包含 OCR）
 
 MuPDF 静态库由 go-fitz 内置提供（libmupdf_linux_amd64.a / libmupdf_windows_amd64.a），
 编译时直接链接进二进制，运行时不需要任何外部 .so / .dll。
@@ -76,21 +180,74 @@ MuPDF 静态库由 go-fitz 内置提供（libmupdf_linux_amd64.a / libmupdf_wind
 
 ```
 pdf2docx/
-├── main.go                    # Fyne GUI 入口
-├── build.sh                   # Docker 一键编译脚本
-├── Dockerfile                 # 编译镜像（基于 ubuntu:24.04）
+├── main.go                     # Fyne GUI 入口
+├── Dockerfile                  # 基础编译镜像（ubuntu:24.04）
+├── Dockerfile.dev              # 开发编译镜像（基础 + libopencv-dev）
+├── dev.sh                      # 启动开发容器
+├── build_cli.sh                # GUI 一键编译（Docker 容器化）
+├── build_server.sh             # Server 一键编译
 ├── go.mod / go.sum
-├── cmd/cli/main.go            # 纯 Go 命令行版本（CGO_ENABLED=0）
-└── internal/pdfconv/
-    ├── convert.go             # PDF → 图片 → docx 主流程
-    └── docx.go                # 手写 OOXML 打包
+├── cmd/
+│   ├── cli/main.go             # 纯 Go 命令行版本
+│   └── server/main.go          # HTTP 服务端
+├── internal/
+│   ├── pdfconv/
+│   │   ├── convert.go          # PDF → 图片 → docx 主流程（含 OCR 集成）
+│   │   ├── docx.go             # 手写 OOXML 打包（截图版）
+│   │   └── docx_text.go        # 手写 OOXML 打包（OCR 文字版）
+│   └── ocr/
+│       ├── types.go            # 基础类型（OCRBox / TextLine / PageText）
+│       ├── model_config.go     # 解析 inference.yml 字符表 + CheckModels()
+│       ├── engine.go           # OCR 引擎（检测→识别→文本，需 CGO）
+│       ├── onnx_api.go         # CGO 绑定 ONNX Runtime C API
+│       ├── ort_bridge.c        # ONNX Runtime C 调用封装
+│       ├── opencv.go           # CGO 绑定 OpenCV
+│       ├── opencv_bridge.cpp   # OpenCV C++→C 桥接函数
+│       ├── preprocess_det.go   # 检测预处理（resize→normalize）
+│       ├── preprocess_rec.go   # 识别预处理（crop→resize→normalize）
+│       ├── postprocess_db.go   # DB 后处理（threshold→连通域→minAreaRect→unclip）
+│       ├── postprocess_ctc.go  # CTC 贪心解码
+│       ├── box_sort.go         # 阅读顺序排列
+│       └── stub.go             # 无 CGO 时的桩实现
+└── build/
+    ├── deps/
+    │   ├── go1.24.13.linux-amd64.tar.gz   # Go toolchain（build_cli.sh 缓存）
+    │   └── onnxruntime/                    # 已 vendor
+    │       ├── include/onnxruntime_c_api.h
+    │       └── lib/libonnxruntime.so
+    ├── gocache/                # Go 编译缓存（挂载 volume，加速重复编译）
+    └── gomodcache/             # Go 模块缓存（挂载 volume）
 ```
 
-## 限制
+## 部署
 
-- 暂不支持加密 PDF
-- 纯文字页面依赖 MuPDF 字体回退，特殊字体效果可能不完美
-- 中文字体渲染依赖系统字体（Windows 通常无问题）
+### 基础版（静态，无外部依赖）
+
+直接将 `dist/pdf2docx` 或 `dist/pdf2docx-server` 放到目标 Linux 机器运行即可。
+
+### OCR 版
+
+目标机器需要：
+
+1. **系统库**：`libopencv_core.so.406` + `libopencv_imgproc.so.406`
+   ```bash
+   sudo apt-get install -y libopencv-core406 libopencv-imgproc406
+   ```
+   或直接安装完整 opencv（`libopencv-dev` 也装的话会有头文件但不影响运行）。
+
+2. **ONNX Runtime**：将 `dist/libonnxruntime.so` 放到可执行文件同目录下（二进制已设置 `$ORIGIN` rpath，自动查找）。
+
+3. **OCR 模型**：将 `models/` 目录放到可执行文件同目录下。
+   ```
+   部署目录/
+   ├── pdf2docx              # GUI 或 pdf2docx-server
+   ├── libonnxruntime.so     # ONNX Runtime 动态库
+   └── models/
+       ├── det/inference.onnx
+       └── rec/
+           ├── inference.onnx
+           └── inference.yml
+   ```
 
 ## License
 

@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"pdftoword/internal/pdfconv"
+	"pdftoword/internal/ocr"
 )
 
 type pdfFile struct {
@@ -92,12 +93,34 @@ func main() {
 	outputLabel := widget.NewLabel("")
 	outputLabel.Wrapping = fyne.TextWrapBreak
 
+	// --- OCR toggle ---
+	baseDir, _ := os.Getwd()
+	if exe, err := os.Executable(); err == nil {
+		baseDir = filepath.Dir(exe)
+	}
+	modelsExist := ocr.CheckModels(baseDir)
+	var ocrCheck *widget.Check
+	var ocrHint *widget.Label
+
+	ocrCheck = widget.NewCheck("生成 OCR 文字版 (.ocr.docx)", func(enabled bool) {
+		// stored; read when conversion starts
+	})
+	if !modelsExist {
+		ocrCheck.Disable()
+		ocrHint = widget.NewLabel("（未检测到 OCR 模型目录 models/）")
+	} else {
+		ocrHint = widget.NewLabel("（已检测到 OCR 模型，可开启）")
+	}
+
+	ocrRow := container.NewHBox(ocrCheck, ocrHint)
+
 	convertBtn = widget.NewButtonWithIcon("开始转换", theme.MediaPlayIcon(), func() {
 		if len(files) == 0 {
 			return
 		}
 		converting = true
 		updateConvertBtn(convertBtn, len(files), converting)
+		ocrCheck.Disable()
 
 		progressBar.Show()
 		progressBar.SetValue(0)
@@ -111,7 +134,7 @@ func main() {
 				w.SetTitle(fmt.Sprintf("PDF2Word - 转换中 (%d/%d)", i+1, total))
 
 				baseProgress := float64(i) / float64(total)
-				docxPath, err := pdfconv.Convert(f.path, func(pct float64) {
+				docxPath, err := pdfconv.Convert(f.path, ocrCheck.Checked, func(pct float64) {
 					// each file contributes 1/total to overall progress
 					overall := baseProgress + pct/float64(total)
 					progressBar.SetValue(overall)
@@ -136,6 +159,9 @@ func main() {
 
 			converting = false
 			updateConvertBtn(convertBtn, len(files), converting)
+			if modelsExist {
+				ocrCheck.Enable()
+			}
 		}()
 	})
 	convertBtn.Disable()
@@ -144,6 +170,7 @@ func main() {
 		statusLabel,
 		progressBar,
 		outputLabel,
+		ocrRow,
 		convertBtn,
 	)
 
