@@ -26,7 +26,7 @@ RUN if [ -n "$HTTP_PROXY" ]; then \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build essentials
-    ca-certificates gcc libc6-dev pkg-config \
+    ca-certificates gcc libc6-dev pkg-config git \
     # MinGW-w64 (Windows cross-compilation)
     gcc-mingw-w64-x86-64 \
     # Fyne: OpenGL rendering
