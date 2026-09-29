@@ -45,5 +45,10 @@ RUN tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOTOOLCHAIN=local
+ENV GOPROXY=https://goproxy.cn,direct
+
+# ── garble (Go obfuscator) ────────────────────────────────────────
+ENV GOBIN=/usr/local/go/bin
+RUN go install mvdan.cc/garble@v0.14.2
 
 WORKDIR /workspace

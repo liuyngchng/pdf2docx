@@ -14,12 +14,14 @@ HTTP_PROXY_VAL=""
 HTTPS_PROXY_VAL=""
 NO_PROXY_VAL=""
 GO_BUILD_X=""   # set to "-x" when verbose is requested
+OBFUSCATE=true
 for arg in "$@"; do
   case "$arg" in
     http_proxy=*|HTTP_PROXY=*)   HTTP_PROXY_VAL="${arg#*=}" ;;
     https_proxy=*|HTTPS_PROXY=*) HTTPS_PROXY_VAL="${arg#*=}" ;;
     no_proxy=*|NO_PROXY=*)       NO_PROXY_VAL="${arg#*=}" ;;
     -x|verbose)                  GO_BUILD_X="-x" ;;
+    --no-obfuscate)              OBFUSCATE=false ;;
     *) ;;
   esac
 done
@@ -80,7 +82,15 @@ else
 fi
 
 # ── Build Docker image if missing ────────────────────────────────
+# When obfuscating, also rebuild if the image predates garble.
+NEEDS_REBUILD=false
 if ! docker image inspect "$IMAGE" &>/dev/null; then
+  NEEDS_REBUILD=true
+elif $OBFUSCATE && ! docker run --rm "$IMAGE" command -v garble &>/dev/null; then
+  NEEDS_REBUILD=true
+fi
+
+if $NEEDS_REBUILD; then
   echo "Building Docker image $IMAGE ..."
   docker build "${DOCKER_BUILD_ARGS[@]}" --build-arg "GO_VERSION=$GO_VERSION" -t "$IMAGE" -f Dockerfile .
   echo "Docker image $IMAGE built"
@@ -97,9 +107,20 @@ COMMON_ENV=(
   -e HOST_GID="$(id -g)"
 )
 
+# ── Obfuscation toggle ────────────────────────────────────────────
+if $OBFUSCATE; then
+  BUILD_BIN="garble -literals"
+  GARBLE_ENV=(-e GOGARBLE=pdftoword)
+  OBF_LABEL=" (obfuscated)"
+else
+  BUILD_BIN="go"
+  GARBLE_ENV=()
+  OBF_LABEL=""
+fi
+
 # ── 1. Linux GUI ─────────────────────────────────────────────────
 echo ""
-echo "=== Building pdf2docx (Linux GUI) ==="
+echo "=== Building pdf2docx (Linux GUI)${OBF_LABEL} ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -107,18 +128,19 @@ docker run --rm \
   -w /workspace \
   "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  ${GARBLE_ENV[@]+"${GARBLE_ENV[@]}"} \
   -e CGO_ENABLED=1 \
   -e GOOS=linux \
   -e GOARCH=amd64 \
   "$IMAGE" \
   bash -c "
-    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
+    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx
   "
 
 # ── 2. Windows GUI ───────────────────────────────────────────────
 echo ""
-echo "=== Building pdf2docx.exe (Windows GUI) ==="
+echo "=== Building pdf2docx.exe (Windows GUI)${OBF_LABEL} ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -126,6 +148,7 @@ docker run --rm \
   -w /workspace \
   "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  ${GARBLE_ENV[@]+"${GARBLE_ENV[@]}"} \
   -e CGO_ENABLED=1 \
   -e GOOS=windows \
   -e GOARCH=amd64 \
@@ -133,7 +156,7 @@ docker run --rm \
   -e CGO_LDFLAGS="-lucrt" \
   "$IMAGE" \
   bash -c "
-    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
+    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx.exe
   "
 

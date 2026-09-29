@@ -20,7 +20,7 @@
 ### 一键编译
 
 ```bash
-./build.sh
+./build_cli.sh
 ```
 
 产出 `dist/` 下两个文件：
@@ -30,10 +30,16 @@
 | `pdf2docx` | Linux amd64 | 独立二进制 |
 | `pdf2docx.exe` | Windows amd64 | 无外部 DLL 依赖，双击运行 |
 
+构建默认使用 [garble](https://github.com/burrowers/garble) 对模块内代码做符号名和字符串字面量混淆（依赖不变）。如果不需要混淆：
+
+```bash
+./build_cli.sh --no-obfuscate
+```
+
 如果需要代理访问外网：
 
 ```bash
-./build.sh http_proxy=http://proxy:8080 https_proxy=http://proxy:8080
+./build_cli.sh http_proxy=http://proxy:8080 https_proxy=http://proxy:8080
 ```
 
 ### 纯 Go 核心逻辑测试（可选）
