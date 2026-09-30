@@ -105,18 +105,47 @@ func runOCRPage(engine *ocr.Engine, img *image.RGBA) []string {
 	}
 
 	// Clean and merge recognized text lines.
-	// Strip ' characters (model delimiter/padding character in PP-OCR).
 	// Join adjacent text lines on the same row into single paragraphs.
 	var cleaned []string
 	for _, l := range pageText.Lines {
-		t := strings.ReplaceAll(l.Text, "'", "")
-		t = strings.TrimSpace(t)
+		t := cleanOCRLine(l.Text)
 		if t == "" {
 			continue
 		}
 		cleaned = append(cleaned, t)
 	}
 	return cleaned
+}
+
+// CJK separator artifacts produced by the PP-OCR/CRNN recognition model:
+// it occasionally emits "- ", " - ", or stray spaces between CJK characters
+// (e.g. "- 为- 贯- 彻-" for "为贯彻"). Strip these without touching
+// legitimate punctuation in Latin text or numbers. Only the ASCII hyphen is
+// treated as an artifact; em/en dashes (— – －) are valid CJK punctuation.
+var (
+	reCJKHyphen = regexp.MustCompile(`(\p{Han})\s*-\s*(\p{Han})`)
+	reCJKSpace  = regexp.MustCompile(`(\p{Han})\s+(\p{Han})`)
+	reCJKLead   = regexp.MustCompile(`^[-\s]+(\p{Han})`)
+	reCJKTrail  = regexp.MustCompile(`(\p{Han})[-\s]+$`)
+)
+
+func cleanOCRLine(s string) string {
+	// Strip ' characters (model delimiter/padding character in PP-OCR).
+	s = strings.ReplaceAll(s, "'", "")
+	// Non-overlapping regex matches can only catch every other separator
+	// pair in a single pass (e.g. "为- 贯- 彻" → "为贯- 彻" leaves the
+	// second hyphen). Loop until stable.
+	for {
+		prev := s
+		s = reCJKHyphen.ReplaceAllString(s, "$1$2")
+		s = reCJKSpace.ReplaceAllString(s, "$1$2")
+		s = reCJKLead.ReplaceAllString(s, "$1")
+		s = reCJKTrail.ReplaceAllString(s, "$1")
+		if s == prev {
+			break
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func encodeJPEG(img *image.RGBA) ([]byte, int, int, error) {
