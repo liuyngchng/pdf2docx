@@ -6,8 +6,8 @@ set -euo pipefail
 #   ./build_cli.sh                 # no OCR (original behavior)
 #   ./build_cli.sh --with-ocr      # Linux GUI with OCR (needs OpenCV + onnxruntime)
 #
-# Windows OCR requires Windows onnxruntime/OpenCV libs (not yet vendored),
-# so the Windows build always uses -tags noocr (OCR checkbox disabled).
+# Windows OCR build must be done natively on Windows:
+#   build.bat    (requires MSYS2 UCRT64)
 # ────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -37,8 +37,8 @@ usage() {
   ./build_cli.sh --no-obfuscate   # 不混淆构建
 
 说明:
-  Windows 构建始终使用 -tags noocr（尚未内置 Windows 的 onnxruntime/OpenCV 库），
-  因此 --with-ocr 只影响 Linux GUI，Windows 版 OCR 复选框始终禁用。
+  Windows 构建始终使用 -tags noocr（交叉编译不支持 Windows OCR）。
+  Windows OCR 版本需在 Windows 上运行 build.bat 编译（需要 MSYS2 UCRT64）。
 EOF
 }
 

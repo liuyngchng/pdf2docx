@@ -3,9 +3,11 @@
 package ocr
 
 /*
-#cgo pkg-config: opencv4
-#cgo CXXFLAGS: -std=c++17
-#cgo LDFLAGS: -Wl,-rpath,'$ORIGIN'
+#cgo linux pkg-config: opencv4
+#cgo linux CXXFLAGS: -std=c++17
+#cgo linux LDFLAGS: -Wl,-rpath,'$ORIGIN'
+#cgo windows pkg-config: opencv4
+#cgo windows CXXFLAGS: -std=c++17
 
 #include <stdint.h>
 

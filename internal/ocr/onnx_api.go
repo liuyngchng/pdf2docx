@@ -3,8 +3,10 @@
 package ocr
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../build/deps/onnxruntime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../build/deps/onnxruntime/lib -lonnxruntime -Wl,-rpath,'$ORIGIN'
+#cgo linux CFLAGS: -I${SRCDIR}/../../build/deps/onnxruntime/include
+#cgo linux LDFLAGS: -L${SRCDIR}/../../build/deps/onnxruntime/lib -lonnxruntime -Wl,-rpath,'$ORIGIN'
+#cgo windows CFLAGS: -I${SRCDIR}/../../build/deps/onnxruntime/win-x64/include
+#cgo windows LDFLAGS: -L${SRCDIR}/../../build/deps/onnxruntime/win-x64/lib -lonnxruntime
 
 #include <stdlib.h>
 #include <stdint.h>
