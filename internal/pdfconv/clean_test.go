@@ -76,8 +76,8 @@ func TestCleanOCRLine(t *testing.T) {
 		},
 		{
 			name:  "person name",
-			input: "组长- ：- 胡长乐",
-			want:  "组长：胡长乐",
+			input: "组长- ：- 张三",
+			want:  "组长：张三",
 		},
 		{
 			name:  "trailing date (no CJK involved)",

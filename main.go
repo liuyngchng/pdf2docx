@@ -30,7 +30,11 @@ func main() {
 	os.Setenv("LC_ALL", "zh_CN.UTF-8")
 	lang.AddTranslationsForLocale([]byte(`{}`), fyne.Locale("zh"))
 
+	// 自定义主题：加大文件选择对话框中"取消"和"打开"按钮之间的间距
+	customTheme := &spacedTheme{Theme: theme.DefaultTheme()}
+
 	a := app.NewWithID("com.pdf2docx.app")
+	a.Settings().SetTheme(customTheme)
 	w := a.NewWindow("PDF2Word - PDF转Word工具")
 
 	// --- data ---
@@ -269,4 +273,18 @@ func updateConvertBtn(btn *widget.Button, n int, converting bool) {
 	} else {
 		btn.Enable()
 	}
+}
+
+// spacedTheme 在默认主题基础上，加大元素之间的 Padding 间距。
+// Fyne 的文件选择对话框用 GridWithRows 排布"取消"和"打开"按钮，
+// 按钮间距取自 theme.Padding()，覆盖该值即可加大两个按钮之间的距离。
+type spacedTheme struct {
+	fyne.Theme
+}
+
+func (t *spacedTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNamePadding {
+		return 16 // 默认 4，加大到 16
+	}
+	return t.Theme.Size(name)
 }
