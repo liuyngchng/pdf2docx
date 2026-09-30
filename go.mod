@@ -6,6 +6,8 @@ toolchain go1.24.13
 
 require github.com/gen2brain/go-fitz v1.28.2
 
+replace github.com/go-text/typesetting => github.com/go-text/typesetting v0.3.5
+
 require github.com/ebitengine/purego v0.10.1 // indirect
 
 require (
