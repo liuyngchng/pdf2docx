@@ -2,8 +2,6 @@
 
 package ocr
 
-import "C"
-
 import (
 	"errors"
 	"image"

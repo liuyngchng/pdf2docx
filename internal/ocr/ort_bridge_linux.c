@@ -1,5 +1,7 @@
+//go:build !noocr
+
 // ort_bridge.c — C wrappers for ONNX Runtime C API called from Go via CGO.
-// Build constraint: paired with ort_bridge.go (//go:build !noocr).
+// Build constraint: paired with onnx_api.go (//go:build !noocr).
 #include <onnxruntime_c_api.h>
 #include <stdio.h>
 #include <stdlib.h>

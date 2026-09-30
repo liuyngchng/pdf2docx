@@ -1,3 +1,5 @@
+//go:build !noocr
+
 // opencv_bridge.cpp — C wrapper around OpenCV C++ functions needed by the OCR pipeline.
 // Go CGO calls these via extern "C" functions. No Go code in this file.
 #include <opencv2/core.hpp>
