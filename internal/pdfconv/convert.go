@@ -117,30 +117,28 @@ func runOCRPage(engine *ocr.Engine, img *image.RGBA) []string {
 	return cleaned
 }
 
-// CJK separator artifacts produced by the PP-OCR/CRNN recognition model:
-// it occasionally emits "- ", " - ", or stray spaces between CJK characters
-// (e.g. "- 为- 贯- 彻-" for "为贯彻"). Strip these without touching
-// legitimate punctuation in Latin text or numbers. Only the ASCII hyphen is
-// treated as an artifact; em/en dashes (— – －) are valid CJK punctuation.
+// Separator artifacts produced by the PP-OCR/CRNN CTC decoder: the model
+// often emits ASCII hyphens with whitespace between every character in a
+// run (e.g. "2- 0- 2- 6", "A- I", "公- 司", "办- 【").  Legitimate
+// hyphens ("hello-world", "A-1") have no whitespace on either side and
+// are preserved.  Em/en dashes (— – －) are not touched.
 var (
-	reCJKHyphen = regexp.MustCompile(`(\p{Han})\s*-\s*(\p{Han})`)
-	reCJKSpace  = regexp.MustCompile(`(\p{Han})\s+(\p{Han})`)
-	reCJKLead   = regexp.MustCompile(`^[-\s]+(\p{Han})`)
-	reCJKTrail  = regexp.MustCompile(`(\p{Han})[-\s]+$`)
+	reHyphenArtifact = regexp.MustCompile(`(\S)\s*-\s+(\S)|(\S)\s+-\s*(\S)`)
+	reLeadHyphen     = regexp.MustCompile(`^\s*-\s*`)
+	reTrailHyphen    = regexp.MustCompile(`\s*-\s*$`)
+	reCJKSpace       = regexp.MustCompile(`(\p{Han})\s+(\p{Han})`)
 )
 
 func cleanOCRLine(s string) string {
 	// Strip ' characters (model delimiter/padding character in PP-OCR).
 	s = strings.ReplaceAll(s, "'", "")
-	// Non-overlapping regex matches can only catch every other separator
-	// pair in a single pass (e.g. "为- 贯- 彻" → "为贯- 彻" leaves the
-	// second hyphen). Loop until stable.
+	// Non-overlapping regex — loop until stable.
 	for {
 		prev := s
-		s = reCJKHyphen.ReplaceAllString(s, "$1$2")
+		s = reHyphenArtifact.ReplaceAllString(s, "$1$2$3$4")
+		s = reLeadHyphen.ReplaceAllString(s, "")
+		s = reTrailHyphen.ReplaceAllString(s, "")
 		s = reCJKSpace.ReplaceAllString(s, "$1$2")
-		s = reCJKLead.ReplaceAllString(s, "$1")
-		s = reCJKTrail.ReplaceAllString(s, "$1")
 		if s == prev {
 			break
 		}

@@ -9,7 +9,7 @@ func TestCleanOCRLine(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "artifact hyphens and spaces between CJK chars",
+			name:  "CJK chars with hyphens",
 			input: "- 为- 贯- 彻- 落- 实- 集- 团- 公- 司- 工- 作- 会- 议- 部- 署-",
 			want:  "为贯彻落实集团公司工作会议部署",
 		},
@@ -29,34 +29,60 @@ func TestCleanOCRLine(t *testing.T) {
 			want:  "为贯彻",
 		},
 		{
-			name:  "Latin text with hyphen preserved",
+			name:  "Latin word hyphen preserved (no spaces)",
 			input: "hello-world test",
 			want:  "hello-world test",
 		},
 		{
-			name:  "mixed CJK and latin with legit hyphens",
+			name:  "identifier A-1 preserved (no spaces)",
 			input: "注: 参见附录A-1内容",
 			want:  "注: 参见附录A-1内容",
 		},
+		// Cases from real OCR output
 		{
-			name:  "leading dash before CJK",
-			input: "- 第一章",
-			want:  "第一章",
+			name:  "doc number with brackets",
+			input: "公司办- 【- 2- 0- 2- 6- 】- 7- 号",
+			want:  "公司办【2026】7号",
 		},
 		{
-			name:  "trailing dash after CJK",
-			input: "结束。 -",
-			want:  "结束。 -",
+			name:  "date with year month day",
+			input: "- 2- 0- 2- 6- 年- 9- .- 月- 2- 3- 日",
+			want:  "2026年9.月23日",
 		},
 		{
-			name:  "emoji and CJK mixed",
-			input: "⚠️ 注意- 事项-",
-			want:  "⚠️ 注意事项",
+			name:  "AI with hyphens",
+			input: "A- I- 赋能比突破",
+			want:  "AI赋能比突破",
 		},
 		{
-			name:  "empty after cleaning (no CJK chars, stripped to bare separator)",
-			input: "' ' - '",
-			want:  "-",
+			name:  "numbered bullet with full-width dot",
+			input: "- 1- ．- 降本创效比贡献- ：- 精细",
+			want:  "1．降本创效比贡献：精细",
+		},
+		{
+			name:  "parenthesized number",
+			input: "- （- 一- ）- 高度重视",
+			want:  "（一）高度重视",
+		},
+		{
+			name:  "mixed CJK and punctuation with hyphens",
+			input: "为贯彻落实- ，- 深化公司- \"- 五化- \"",
+			want:  "为贯彻落实，深化公司\"五化\"",
+		},
+		{
+			name:  "page number",
+			input: "- —- 1- —",
+			want:  "—1—",
+		},
+		{
+			name:  "person name",
+			input: "组长- ：- 胡长乐",
+			want:  "组长：胡长乐",
+		},
+		{
+			name:  "trailing date (no CJK involved)",
+			input: "- 3",
+			want:  "3",
 		},
 	}
 

@@ -186,14 +186,14 @@ ARCHIVE="pdf2docx-server-linux-amd64.tar"
 rm -f "$SCRIPT_DIR/dist/$ARCHIVE"
 if $WITH_OCR; then
   cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE" pdf2docx-server libonnxruntime.so models/
+  tar -cf "$ARCHIVE" --transform='s,^,pdf2docx-server-linux-amd64/,' pdf2docx-server libonnxruntime.so models/
   cd "$SCRIPT_DIR"
   echo "  $ARCHIVE  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE" | cut -f1)) — Linux server OCR 完整包"
 
   rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
 else
   cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE" pdf2docx-server
+  tar -cf "$ARCHIVE" --transform='s,^,pdf2docx-server-linux-amd64/,' pdf2docx-server
   cd "$SCRIPT_DIR"
   echo "  $ARCHIVE  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE" | cut -f1))"
 

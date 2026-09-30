@@ -291,7 +291,7 @@ rm -f "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" "$SCRIPT_DIR/dist/$ARCHIVE_WIN"
 
 if $WITH_OCR; then
   cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE_LINUX" \
+  tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' \
     pdf2docx \
     libonnxruntime.so \
     libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12 \
@@ -308,7 +308,7 @@ if $WITH_OCR; then
     "$SCRIPT_DIR/dist/models"
 else
   cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE_LINUX" pdf2docx
+  tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' pdf2docx
   cd "$SCRIPT_DIR"
   echo "  $ARCHIVE_LINUX  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" | cut -f1))"
 
@@ -316,7 +316,7 @@ else
 fi
 
 cd "$SCRIPT_DIR/dist"
-tar -cf "$ARCHIVE_WIN" pdf2docx.exe
+tar -cf "$ARCHIVE_WIN" --transform='s,^,pdf2docx-windows-amd64/,' pdf2docx.exe
 cd "$SCRIPT_DIR"
 echo "  $ARCHIVE_WIN  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_WIN" | cut -f1))"
 rm -f "$SCRIPT_DIR/dist/pdf2docx.exe"
@@ -328,7 +328,7 @@ echo "  dist/$ARCHIVE_WIN"
 echo ""
 if $WITH_OCR; then
   echo "Linux OCR 包内容: pdf2docx + .so 库 + models/ 模型目录"
-  echo "解包后在同一目录下运行 ./pdf2docx 即可使用 OCR。"
+  echo "解包后进入 pdf2docx-linux-amd64/ 目录，运行 ./pdf2docx 即可使用 OCR。"
 else
   echo "Linux 包内容: pdf2docx（独立静态文件，无需额外依赖）"
 fi

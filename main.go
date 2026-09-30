@@ -15,8 +15,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"pdftoword/internal/pdfconv"
 	"pdftoword/internal/ocr"
+	"pdftoword/internal/pdfconv"
 )
 
 type pdfFile struct {
@@ -130,38 +130,48 @@ func main() {
 			var results []string
 			total := len(files)
 			for i, f := range files {
-				statusLabel.SetText(fmt.Sprintf("正在处理 (%d/%d): %s", i+1, total, f.name))
-				w.SetTitle(fmt.Sprintf("PDF2Word - 转换中 (%d/%d)", i+1, total))
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("正在处理 (%d/%d): %s", i+1, total, f.name))
+					w.SetTitle(fmt.Sprintf("PDF2Word - 转换中 (%d/%d)", i+1, total))
+				})
 
 				baseProgress := float64(i) / float64(total)
-				docxPath, err := pdfconv.Convert(f.path, ocrCheck.Checked, func(pct float64) {
+				_, err := pdfconv.Convert(f.path, ocrCheck.Checked, func(pct float64) {
 					// each file contributes 1/total to overall progress
 					overall := baseProgress + pct/float64(total)
-					progressBar.SetValue(overall)
+					fyne.Do(func() {
+						progressBar.SetValue(overall)
+					})
 				})
-				if err != nil {
-					dialog.ShowError(fmt.Errorf("转换 %s 失败: %w", f.name, err), w)
-					results = append(results, fmt.Sprintf("[失败] %s", f.name))
-					progressBar.SetValue(float64(i+1) / float64(total))
-				} else {
-					results = append(results, fmt.Sprintf("[完成] %s -> %s", f.name, filepath.Base(docxPath)))
-					progressBar.SetValue(float64(i+1) / float64(total))
+				fyne.Do(func() {
+					if err != nil {
+						dialog.ShowError(fmt.Errorf("转换 %s 失败: %w", f.name, err), w)
+						results = append(results, fmt.Sprintf("[失败] %s", f.name))
+						progressBar.SetValue(float64(i+1) / float64(total))
+					} else {
+						results = append(results, "✓ "+truncateName(f.name, 30))
+						progressBar.SetValue(float64(i+1) / float64(total))
+					}
+				})
+			}
+
+			fyne.Do(func() {
+				progressBar.Hide()
+				statusLabel.SetText("全部转换完成！")
+				outputLabel.SetText(strings.Join(results, "\n"))
+				w.SetTitle("PDF2Word - 完成")
+
+				msgLabel := widget.NewLabel(fmt.Sprintf("共 %d 个文件:\n\n%s", total, strings.Join(results, "\n")))
+				msgLabel.Alignment = fyne.TextAlignLeading
+				d := dialog.NewCustom("批量转换完成", "确定", msgLabel, w)
+				d.Show()
+
+				converting = false
+				updateConvertBtn(convertBtn, len(files), converting)
+				if modelsExist {
+					ocrCheck.Enable()
 				}
-			}
-
-			progressBar.Hide()
-			statusLabel.SetText("全部转换完成！")
-			outputLabel.SetText(strings.Join(results, "\n"))
-			w.SetTitle("PDF2Word - 完成")
-
-			dialog.ShowInformation("批量转换完成",
-				fmt.Sprintf("共 %d 个文件:\n\n%s", total, strings.Join(results, "\n")), w)
-
-			converting = false
-			updateConvertBtn(convertBtn, len(files), converting)
-			if modelsExist {
-				ocrCheck.Enable()
-			}
+			})
 		}()
 	})
 	convertBtn.Disable()
@@ -210,17 +220,41 @@ func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, coun
 		}
 
 		*files = append(*files, pdfFile{path: pdfPath, name: filepath.Base(pdfPath)})
-		fileList.Refresh()
-		updateCountLabel(countLabel, len(*files))
-		updateConvertBtn(convertBtn, len(*files), converting)
 
-		// Scroll to bottom
-		fileList.ScrollToBottom()
+		// OnClosed may fire from a non-UI goroutine; ensure widget
+		// updates happen on the Fyne canvas goroutine.
+		fyne.Do(func() {
+			fileList.Refresh()
+			updateCountLabel(countLabel, len(*files))
+			updateConvertBtn(convertBtn, len(*files), converting)
+
+			// Scroll to bottom
+			fileList.ScrollToBottom()
+		})
 	}, w)
 
 	fd.SetFilter(storage.NewExtensionFileFilter([]string{".pdf"}))
 	fd.Show()
 	fd.Resize(fyne.NewSize(800, 600))
+}
+
+func truncateName(name string, maxChars int) string {
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+
+	runes := []rune(base)
+	extRunes := []rune(ext)
+
+	if len(runes)+len(extRunes) <= maxChars {
+		return name
+	}
+
+	// Reserve space for "..." and extension
+	keep := maxChars - 3 - len(extRunes)
+	if keep < 1 {
+		keep = 1
+	}
+	return string(runes[:keep]) + "..." + ext
 }
 
 func updateCountLabel(l *widget.Label, n int) {
