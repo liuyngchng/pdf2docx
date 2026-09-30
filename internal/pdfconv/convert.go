@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"pdftoword/internal/ocr"
