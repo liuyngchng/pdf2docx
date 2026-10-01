@@ -45,9 +45,40 @@ OCR 版启动后，如果 GUI 检测到 `models/` 目录（含 `det/inference.on
 | 文件 | 平台 | 说明 |
 |------|------|------|
 | `pdf2docx` | Linux amd64 | GUI 桌面版 |
-| `pdf2docx.exe` | Windows amd64 | GUI 桌面版（Windows 暂不支持 OCR） |
+| `pdf2docx.exe` | Windows amd64 | GUI 桌面版（交叉编译，不含 OCR） |
 | `pdf2docx-server` | Linux amd64 | HTTP 服务端 |
 | `libonnxruntime.so` | Linux amd64 | OCR 版附带（`--with-ocr` 时产出） |
+
+### Windows OCR 版编译
+
+由于 OpenCV C++ ABI 不兼容（MinGW 无法链接 MSVC 编译的 OpenCV DLL），Windows OCR 版**必须在 Windows 上原生编译**，无法在 Docker 中交叉编译。
+
+**编译者需在 Windows 上安装 [MSYS2](https://www.msys2.org/)**（获得 MinGW-w64 工具链 + pacman 包管理）。
+
+安装后打开"MSYS2 UCRT64"终端，执行一次软件包更新：
+
+```bash
+pacman -Syu
+# 按提示关闭终端，再打开再执行一次（直到无更新）
+pacman -Su
+```
+
+然后**在 cmd 或 PowerShell 中**（不需要从 MSYS2 终端启动）运行：
+
+```cmd
+build.bat
+```
+
+产出 `dist\pdf2docx-windows-amd64-ocr.zip`，包含：
+
+| 文件 | 说明 |
+|------|------|
+| `pdf2docx.exe` | 原生 Windows GUI（含 OCR 支持） |
+| `onnxruntime.dll` | ONNX Runtime 运行时 |
+| `libopencv_core*.dll` 等 | OpenCV 运行时（自动收集依赖） |
+| `models/` | OCR 模型目录 |
+
+**最终用户不需要安装 MSYS2**，解压 zip 双击 `pdf2docx.exe` 即可使用 OCR 功能。
 
 构建默认使用 [garble](https://github.com/burrowers/garble) 对模块内代码做符号名和字符串字面量混淆（依赖不变）。如果不需要混淆：
 
@@ -170,7 +201,14 @@ ubuntu:24.04
             │     └─ 链接 libopencv_core + libopencv_imgproc + libonnxruntime
             └─ CGO_ENABLED=1 GOOS=windows
                CC=x86_64-w64-mingw32-gcc  → pdf2docx.exe（PE32+）
-               （Windows 版使用 -tags noocr，不包含 OCR）
+               （Windows 版使用 -tags noocr，不含 OCR）
+
+Windows OCR 版需在 Windows 上通过 build.bat 使用 MSYS2 MinGW-w64 原生编译：
+  MSYS2 UCRT64 (Windows)
+    ├─ pacman 安装 mingw-w64-ucrt-x86_64-go/gcc/opencv
+    ├─ 下载 onnxruntime Windows 预编译包 → gendef + dlltool 生成 MinGW 导入库
+    ├─ CGO_ENABLED=1 GOOS=windows → pdf2docx.exe（PE32+，含 OCR）
+    └─ 收集 DLL + models/ → zip 分发包
 
 MuPDF 静态库由 go-fitz 内置提供（libmupdf_linux_amd64.a / libmupdf_windows_amd64.a），
 编译时直接链接进二进制，运行时不需要任何外部 .so / .dll。
@@ -184,7 +222,8 @@ pdf2docx/
 ├── Dockerfile                  # 基础编译镜像（ubuntu:24.04）
 ├── Dockerfile.dev              # 开发编译镜像（基础 + libopencv-dev）
 ├── dev.sh                      # 启动开发容器
-├── build_cli.sh                # GUI 一键编译（Docker 容器化）
+├── build_cli.sh                # GUI 一键编译（Docker 容器化，Linux + Windows 交叉编译）
+├── build.bat                   # Windows OCR 版编译（MSYS2 MinGW-w64 原生编译）
 ├── build_server.sh             # Server 一键编译
 ├── go.mod / go.sum
 ├── cmd/
