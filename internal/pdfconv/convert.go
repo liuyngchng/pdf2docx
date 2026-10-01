@@ -236,10 +236,3 @@ func textOutputPath(pdfPath string) string {
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 	return filepath.Join(dir, name+".text.docx")
 }
-
-func ocrOutputPath(pdfPath string) string {
-	dir := filepath.Dir(pdfPath)
-	base := filepath.Base(pdfPath)
-	name := strings.TrimSuffix(base, filepath.Ext(base))
-	return filepath.Join(dir, name+".ocr.docx")
-}

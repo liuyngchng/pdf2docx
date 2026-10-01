@@ -106,7 +106,7 @@ func main() {
 	var ocrCheck *widget.Check
 	var ocrHint *widget.Label
 
-	ocrCheck = widget.NewCheck("生成 OCR 文字版 (.ocr.docx)", func(enabled bool) {
+	ocrCheck = widget.NewCheck("生成文字版 (.text.docx)", func(enabled bool) {
 		// stored; read when conversion starts
 	})
 	if !modelsExist {
@@ -140,17 +140,15 @@ func main() {
 				})
 
 				baseProgress := float64(i) / float64(total)
-				mode := pdfconv.ModeImage
-				if ocrCheck.Checked {
-					mode = pdfconv.ModeText
-				}
-				_, err := pdfconv.Convert(f.path, mode, func(pct float64) {
-					// each file contributes 1/total to overall progress
+				// Always produce the screenshot version (兜底).
+				_, err := pdfconv.Convert(f.path, pdfconv.ModeImage, func(pct float64) {
 					overall := baseProgress + pct/float64(total)
-					fyne.Do(func() {
-						progressBar.SetValue(overall)
-					})
+					fyne.Do(func() { progressBar.SetValue(overall) })
 				})
+				if err == nil && ocrCheck.Checked {
+					// Also produce a text version (auto-detect text layer or OCR).
+					pdfconv.Convert(f.path, pdfconv.ModeText, func(pct float64) {})
+				}
 				fyne.Do(func() {
 					if err != nil {
 						dialog.ShowError(fmt.Errorf("转换 %s 失败: %w", f.name, err), w)
