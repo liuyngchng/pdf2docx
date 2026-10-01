@@ -95,6 +95,10 @@ func convertToText(doc *fitz.Document, pdfPath string, numPages int, progressFn 
 		lines := nonEmptyLines(pageText)
 		if len(lines) > 0 {
 			// This page has a text layer — use it directly.
+			// NOTE: MuPDF's Text() outputs blocks in PDF content-stream
+			// order, NOT visual (top-to-bottom) order.  Page footers
+			// may appear before body text.  A proper fix would require
+			// layout analysis (bbox sorting / AI-based zoning).
 			db.addPage(lines)
 		} else {
 			// No text layer — fall back to OCR.
