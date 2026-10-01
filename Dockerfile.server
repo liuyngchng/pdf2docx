@@ -1,0 +1,38 @@
+# ================================================================
+# Production Docker image for the pdf2docx HTTP server.
+#
+# This image only packages a PRE-BUILT binary from dist/ — it does NOT
+# compile. Build the binary first (inside Docker) then build the image:
+#
+#   ./build_server.sh --docker     # builds binary + image in one go
+#
+#   # or step by step:
+#   ./build_server.sh              # 1) build binary → dist/
+#   docker build -t pdf2docx-server -f Dockerfile.server .
+#   #                                 2) package dist/ into image
+#
+# Run:
+#   docker run -p 8080:8080 pdf2docx-server
+# ================================================================
+
+FROM ubuntu:24.04
+
+# Runtime deps: OpenCV libs for OCR.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopencv-core406t64 \
+    libopencv-imgproc406t64 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Pre-built binary + ONNX Runtime shared lib + OCR models.
+COPY dist/pdf2docx-server /app/pdf2docx-server
+COPY dist/libonnxruntime.so /app/libonnxruntime.so
+COPY dist/models /app/models
+
+ENV PORT=8080
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/pdf2docx-server"]

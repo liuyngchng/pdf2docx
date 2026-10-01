@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────
-# Build the headless HTTP server binary (Linux).
-#   ./build_server.sh                 # static, no OCR (original behavior)
-#   ./build_server.sh --with-ocr      # dynamic, with OCR (needs OpenCV + onnxruntime)
+# Build the headless HTTP server binary (Linux, with OCR).
+#   ./build_server.sh                 # build server binary + bundle deps
+#   ./build_server.sh --docker        # build a production Docker image
 #
-# OCR build requires on the host:
-#   - libopencv-dev (pkg-config opencv4)
-#   - build/deps/onnxruntime/ (header + libonnxruntime.so, already vendored)
+# The server binary is dynamically linked and requires:
+#   - libopencv_core + libopencv_imgproc (from libopencv-dev)
+#   - libonnxruntime.so (vendored in build/deps/onnxruntime/lib/)
 # ────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,25 +19,19 @@ usage() {
 用法: ./build_server.sh [参数...]
 
 参数说明:
-  --with-ocr              构建带 OCR 支持的服务器（需要 libopencv-dev + vendored onnxruntime）
-  --no-obfuscate          关闭 garble 代码混淆（默认开启；OCR 模式下混淆自动跳过）
-  -x | verbose            输出 go build 的详细编译日志（-x）
-  -h | --help             显示本帮助并退出
-
-代理参数（从环境变量继承，可选）:
-  HTTP_PROXY / http_proxy     设置 HTTP 代理
-  HTTPS_PROXY / https_proxy   设置 HTTPS 代理
+  --docker           构建生产 Docker 镜像（推荐部署方式）
+  --no-obfuscate     关闭 garble 代码混淆（默认开启）
+  -x | verbose       输出 go build 的详细编译日志（-x）
+  -h | --help        显示本帮助并退出
 
 示例:
-  ./build_server.sh                  # 默认构建（静态链接，无 OCR，开启混淆）
-  ./build_server.sh --with-ocr       # 构建带 OCR 的服务器（动态链接）
-  ./build_server.sh --with-ocr -x    # 带 OCR 且输出详细编译日志
-  ./build_server.sh --no-obfuscate   # 不混淆构建
+  ./build_server.sh                  # 构建二进制 + 依赖到 dist/
+  ./build_server.sh --docker         # 构建 Docker 镜像 pdf2docx-server:latest
+  ./build_server.sh --docker -x      # 详细日志 + Docker 镜像
 
 说明:
-  不带 --with-OCR 时产出静态链接二进制，可直接部署到任意 Linux 主机。
-  带 --with-OCR 时产出动态链接二进制，目标主机需安装 libopencv-dev 并在二进制旁放置
-  libonnxruntime.so。
+  Server 始终以 CGO 编译，集成 OCR 支持（PaddleOCR + MuPDF）。
+  Docker 镜像是推荐部署方式，开箱即用。
 EOF
 }
 
@@ -48,166 +42,131 @@ if [[ ! -f "go.mod" ]]; then
   exit 1
 fi
 
-if ! command -v go &>/dev/null; then
-  echo "ERROR: go not found"
+if ! command -v docker &>/dev/null; then
+  echo "ERROR: docker not found"
   exit 1
 fi
 
-GO_BUILD_X=""   # set to "-x" when verbose is requested
+GO_BUILD_X=""
 OBFUSCATE=true
-WITH_OCR=false
+BUILD_DOCKER=false
 for arg in "$@"; do
   case "$arg" in
     -x|verbose)      GO_BUILD_X="-x" ;;
     --no-obfuscate)  OBFUSCATE=false ;;
-    --with-ocr)      WITH_OCR=true ;;
+    --docker)        BUILD_DOCKER=true ;;
     -h|--help|help)  usage; exit 0 ;;
     *)               echo "WARNING: 未知参数 '$arg'，已忽略（用 -h 查看用法）" ;;
   esac
 done
 
-# 打印参数用法说明，便于在日志里看到各参数含义
+# Print usage on interactive terminal.
 if [[ -t 1 ]]; then
   usage
 fi
 
-# ── 总是输出当前构建参数（日志中可见） ────────────────────────────
 echo ""
 echo "────────────────────────────────────────────────────────"
-echo "  构建参数说明:"
-echo "    --with-ocr         构建带 OCR 支持的服务器"
-echo "                       需要 libopencv-dev + vendored onnxruntime"
-echo "    --no-obfuscate     关闭 garble 代码混淆（默认开启混淆）"
-echo "    -x | verbose       输出 go build 详细编译日志"
-echo "    -h | --help        显示帮助并退出"
-echo "    HTTP_PROXY         从环境变量继承 HTTP 代理"
-echo "    HTTPS_PROXY        从环境变量继承 HTTPS 代理"
-echo "────────────────────────────────────────────────────────"
-echo "  当前参数:"
-echo "    WITH_OCR       = $WITH_OCR"
-echo "    OBFUSCATE      = $OBFUSCATE"
-echo "    GO_BUILD_X     = ${GO_BUILD_X:-(未设置)}"
-echo "    HTTP_PROXY     = ${HTTP_PROXY:-${http_proxy:-(未设置)}}"
-echo "    HTTPS_PROXY    = ${HTTPS_PROXY:-${https_proxy:-(未设置)}}"
+echo "  构建参数:"
+echo "    BUILD_DOCKER  = $BUILD_DOCKER"
+echo "    OBFUSCATE     = $OBFUSCATE"
+echo "    GO_BUILD_X    = ${GO_BUILD_X:-(未设置)}"
 echo "────────────────────────────────────────────────────────"
 echo ""
 
-mkdir -p "$SCRIPT_DIR/dist"
-
-# ── Proxy (from environment) ──────────────────────────────────────
-HTTP_PROXY_VAL="${HTTP_PROXY:-${http_proxy:-}}"
-HTTPS_PROXY_VAL="${HTTPS_PROXY:-${https_proxy:-}}"
-
-add_scheme() { local v="$1"; [[ -z "$v" || "$v" == *"://"* ]] && { printf '%s' "$v"; return; }; printf 'http://%s' "$v"; }
-HTTP_PROXY_VAL="$(add_scheme "$HTTP_PROXY_VAL")"
-HTTPS_PROXY_VAL="$(add_scheme "$HTTPS_PROXY_VAL")"
-
-if [[ -n "$HTTP_PROXY_VAL" || -n "$HTTPS_PROXY_VAL" ]]; then
-  export HTTP_PROXY="$HTTP_PROXY_VAL" HTTPS_PROXY="$HTTPS_PROXY_VAL"
-  export http_proxy="$HTTP_PROXY_VAL" https_proxy="$HTTPS_PROXY_VAL"
+# ── Build image must exist ──────────────────────────────────────
+IMAGE="pdf2docx_dev:latest"
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+  echo "Building dev image $IMAGE ..."
+  docker build -t "$IMAGE" -f Dockerfile.dev .
+  echo "Done."
 fi
 
-# ── OCR toggle ────────────────────────────────────────────────────
-if $WITH_OCR; then
-  if ! pkg-config --exists opencv4; then
-    echo "ERROR: --with-ocr requires libopencv-dev (pkg-config opencv4)"
+# ── Persistent Go caches (like voice_note pattern) ──────────────
+GOCACHE_DIR="$SCRIPT_DIR/build/gocache_dev"
+GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
+mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
+
+ONNXRT_LIB="$SCRIPT_DIR/build/deps/onnxruntime"
+
+COMMON_ENV=(
+  -e GOFLAGS="-buildvcs=false"
+  -e GOCACHE=/tmp/gocache
+  -e GOMODCACHE=/go/pkg/mod
+  -e GOPROXY="https://goproxy.cn,direct"
+  -e CGO_ENABLED=1
+  -e CGO_LDFLAGS="-L/workspace/build/deps/onnxruntime/lib -lonnxruntime"
+  -e CGO_CFLAGS="-I/workspace/build/deps/onnxruntime/include"
+)
+
+# ── Build binary ─────────────────────────────────────────────────
+echo ""
+echo "=== Building pdf2docx-server ==="
+docker run --rm \
+  -v "$SCRIPT_DIR":/workspace \
+  -v "$GOCACHE_DIR":/tmp/gocache \
+  -v "$GOMODCACHE_DIR":/go/pkg/mod \
+  -w /workspace \
+  "${COMMON_ENV[@]}" \
+  -e GOOS=linux \
+  -e GOARCH=amd64 \
+  "$IMAGE" \
+  bash -c "
+    rm -rf /workspace/dist/pdf2docx-server
+    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w -r \$ORIGIN' -o dist/pdf2docx-server ./cmd/server/ && \
+    echo 'Build complete.'
+  "
+
+echo "  dist/pdf2docx-server ($(du -h "$SCRIPT_DIR/dist/pdf2docx-server" | cut -f1))"
+
+# ── Bundle runtime deps ──────────────────────────────────────────
+rm -rf "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
+
+cp "$ONNXRT_LIB/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
+echo "  bundled: dist/libonnxruntime.so"
+
+cp -r "$SCRIPT_DIR/models" "$SCRIPT_DIR/dist/models"
+echo "  bundled: dist/models/"
+
+# ── Docker image (if requested) ──────────────────────────────────
+if $BUILD_DOCKER; then
+  # Dockerfile.server COPYs from dist/ — make sure the binary is present
+  # (built above). Guard against someone running `docker build` directly
+  # with an empty dist/.
+  if [[ ! -f "$SCRIPT_DIR/dist/pdf2docx-server" ]]; then
+    echo "ERROR: dist/pdf2docx-server not found." >&2
+    echo "       Run './build_server.sh' first to build the binary." >&2
     exit 1
   fi
-  ONNXRT_LIB="$SCRIPT_DIR/build/deps/onnxruntime/lib"
-  if [[ ! -f "$ONNXRT_LIB/libonnxruntime.so" ]]; then
-    echo "ERROR: --with-ocr requires $ONNXRT_LIB/libonnxruntime.so (vendored onnxruntime)"
-    exit 1
-  fi
-  OCR_TAGS=""
-  OCR_CGO=1
-  OCR_LABEL=" with OCR"
-else
-  OCR_TAGS="-tags noocr"
-  OCR_CGO=0
-  OCR_LABEL=" (static, no OCR)"
+
+  echo ""
+  echo "=== Building Docker image pdf2docx-server:latest ==="
+  docker build -t pdf2docx-server:latest -f Dockerfile.server "$SCRIPT_DIR"
+  echo ""
+  echo "=== Docker image built ==="
+  echo "  pdf2docx-server:latest"
+  echo ""
+  echo "Run with:"
+  echo "  docker run -p 8080:8080 pdf2docx-server:latest"
+  exit 0
 fi
 
-# ── Obfuscation toggle ────────────────────────────────────────────
-if $OBFUSCATE && ! $WITH_OCR; then
-  # Only garble for the static build; garble + cgo + vendored libs is flaky.
-  if ! command -v garble &>/dev/null; then
-    echo "garble not found; installing mvdan.cc/garble@v0.14.2 ..."
-    GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
-      go install mvdan.cc/garble@v0.14.2
-    if ! command -v garble &>/dev/null; then
-      echo "ERROR: garble installation failed; try adding \$(go env GOPATH)/bin to PATH"
-      exit 1
-    fi
-    echo "garble installed successfully"
-  fi
-  BUILD_BIN="garble -literals"
-  export GOGARBLE=pdftoword
-  OBF_LABEL=" (obfuscated)"
-  SERVER_CGO=0
-elif $OBFUSCATE && $WITH_OCR; then
-  # OCR build skips garble (cgo + garble incompatibility).
-  BUILD_BIN="go"
-  unset GOGARBLE 2>/dev/null || true
-  OBF_LABEL=" (obfuscation skipped with OCR)"
-  SERVER_CGO=1
-else
-  BUILD_BIN="go"
-  unset GOGARBLE 2>/dev/null || true
-  OBF_LABEL=""
-  SERVER_CGO=${OCR_CGO}
-fi
-
-# Clean dist/ and build.
-rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
-mkdir -p "$SCRIPT_DIR/dist"
-
-echo ""
-echo "=== Building pdf2docx-server${OCR_LABEL}${OBF_LABEL} ==="
-CGO_ENABLED=${SERVER_CGO} GOOS=linux GOARCH=amd64 \
-  ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod ${OCR_TAGS} -ldflags='-s -w' -o dist/pdf2docx-server ./cmd/server/
-
-# Bundle libonnxruntime.so + models for OCR builds.
-if $WITH_OCR; then
-  cp "$ONNXRT_LIB/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
-  echo "  bundled:  dist/libonnxruntime.so"
-
-  cp -r "$SCRIPT_DIR/models" "$SCRIPT_DIR/dist/models"
-  echo "  bundled:  dist/models/"
-fi
-
-echo ""
-echo "=== Build complete ==="
-echo "  Linux server: dist/pdf2docx-server ($(du -h "$SCRIPT_DIR/dist/pdf2docx-server" | cut -f1))"
-
-# ── Package into tar for distribution ────────────────────────────
+# ── Package tar ──────────────────────────────────────────────────
 echo ""
 echo "--- Packaging ---"
 ARCHIVE="pdf2docx-server-linux-amd64.tar"
 rm -f "$SCRIPT_DIR/dist/$ARCHIVE"
-if $WITH_OCR; then
-  cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE" --transform='s,^,pdf2docx-server-linux-amd64/,' pdf2docx-server libonnxruntime.so models/
-  cd "$SCRIPT_DIR"
-  echo "  $ARCHIVE  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE" | cut -f1)) — Linux server OCR 完整包"
+cd "$SCRIPT_DIR/dist"
+tar -cf "$ARCHIVE" --transform='s,^,pdf2docx-server-linux-amd64/,' pdf2docx-server libonnxruntime.so models/
+cd "$SCRIPT_DIR"
+echo "  $ARCHIVE  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE" | cut -f1))"
 
-  rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
-else
-  cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE" --transform='s,^,pdf2docx-server-linux-amd64/,' pdf2docx-server
-  cd "$SCRIPT_DIR"
-  echo "  $ARCHIVE  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE" | cut -f1))"
-
-  rm -f "$SCRIPT_DIR/dist/pdf2docx-server"
-fi
+# Clean up loose files.
+rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
 
 echo ""
-echo "分发文件（做好的压缩包）:"
+echo "分发文件:"
 echo "  dist/$ARCHIVE"
 echo ""
-if $WITH_OCR; then
-  echo "OCR 包内容: pdf2docx-server + libonnxruntime.so + models/ 模型目录"
-  echo "OCR build is dynamic: target host needs libopencv_core + libopencv_imgproc"
-  echo "(libopencv-dev or equivalent) and dist/libonnxruntime.so beside the binary."
-else
-  echo "包内容: pdf2docx-server（静态链接二进制，可直接部署到任意 Linux 主机）"
-fi
+echo "部署: 解包后进入 pdf2docx-server-linux-amd64/，运行 ./pdf2docx-server"
+echo "目标主机需安装: libopencv_core + libopencv_imgproc (libopencv-dev)"

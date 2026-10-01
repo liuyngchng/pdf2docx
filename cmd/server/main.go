@@ -1,8 +1,13 @@
 // Command server is a headless HTTP server that converts PDF to DOCX.
 //
-// Build (static, no CGO):
+// Build (Docker, with OCR):
 //
-//	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o pdf2docx-server ./cmd/server/
+//	./build_server.sh
+//
+// The server exposes two conversion modes:
+//
+//	POST /convert/image  → screenshot DOCX (always works)
+//	POST /convert/text   → text-layer DOCX (extract text for native PDFs, OCR for scans)
 package main
 
 import (
@@ -29,7 +34,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /convert", handleConvert)
+	mux.HandleFunc("POST /convert/image", handleConvertImage)
+	mux.HandleFunc("POST /convert/text", handleConvertText)
 	mux.HandleFunc("GET /health", handleHealth)
 
 	srv := &http.Server{
@@ -82,7 +88,15 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok"}`))
 }
 
-func handleConvert(w http.ResponseWriter, r *http.Request) {
+func handleConvertImage(w http.ResponseWriter, r *http.Request) {
+	convertAndServe(w, r, pdfconv.ModeImage)
+}
+
+func handleConvertText(w http.ResponseWriter, r *http.Request) {
+	convertAndServe(w, r, pdfconv.ModeText)
+}
+
+func convertAndServe(w http.ResponseWriter, r *http.Request, mode pdfconv.ConvertMode) {
 	// Limit upload to 64 MB.
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -103,6 +117,7 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 	slog.Info("conversion started",
 		"filename", header.Filename,
 		"size_bytes", header.Size,
+		"mode", mode,
 	)
 
 	// Write upload to a temp file.
@@ -124,10 +139,7 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 
 	// Convert.
 	convStart := time.Now()
-	enableOCR := r.FormValue("ocr") == "true"
-	docxPath, err := pdfconv.Convert(pdfTmp.Name(), enableOCR, func(pct float64) {
-		// SSE progress could go here; for now we just log milestones.
-	})
+	docxPath, err := pdfconv.Convert(pdfTmp.Name(), mode, func(pct float64) {})
 	convDuration := time.Since(convStart)
 
 	if err != nil {
@@ -135,6 +147,7 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 			"filename", header.Filename,
 			"error", err,
 			"duration_ms", convDuration.Milliseconds(),
+			"mode", mode,
 		)
 		http.Error(w, fmt.Sprintf("conversion failed: %v", err), http.StatusInternalServerError)
 		return
@@ -145,11 +158,12 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 		"filename", header.Filename,
 		"output", filepath.Base(docxPath),
 		"duration_ms", convDuration.Milliseconds(),
+		"mode", mode,
 	)
 
 	// Stream the generated .docx back.
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, docxFilename(header.Filename)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, docxFilename(header.Filename, mode)))
 
 	docxF, err := os.Open(docxPath)
 	if err != nil {
@@ -164,7 +178,11 @@ func handleConvert(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func docxFilename(pdfName string) string {
+func docxFilename(pdfName string, mode pdfconv.ConvertMode) string {
 	ext := filepath.Ext(pdfName)
-	return pdfName[:len(pdfName)-len(ext)] + ".docx"
+	base := pdfName[:len(pdfName)-len(ext)]
+	if mode == pdfconv.ModeText {
+		return base + ".text.docx"
+	}
+	return base + ".docx"
 }

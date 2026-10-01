@@ -18,28 +18,49 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli [--ocr] <pdf_file>\n")
-		os.Exit(1)
-	}
-
-	enableOCR := false
+	mode := pdfconv.ModeImage
 	var pdfPath string
+
 	for _, arg := range os.Args[1:] {
-		if arg == "--ocr" {
-			enableOCR = true
-		} else {
+		switch arg {
+		case "--ocr":
+			// Backward compatible alias for --mode text.
+			mode = pdfconv.ModeText
+		case "--mode":
+			// Consumed below via positional check.
+		default:
 			pdfPath = arg
 		}
 	}
+
+	// Check for --mode <value> in args.
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--mode" && i+1 < len(os.Args) {
+			switch os.Args[i+1] {
+			case "image":
+				mode = pdfconv.ModeImage
+			case "text":
+				mode = pdfconv.ModeText
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown mode: %s (valid: image, text)\n", os.Args[i+1])
+				os.Exit(1)
+			}
+			break
+		}
+	}
+
 	if pdfPath == "" {
-		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli [--ocr] <pdf_file>\n")
+		fmt.Fprintf(os.Stderr, "Usage: pdftoword-cli [--mode image|text] [--ocr] <pdf_file>\n")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Converting: %s (OCR: %v)\n", pdfPath, enableOCR)
+	modeLabel := "image"
+	if mode == pdfconv.ModeText {
+		modeLabel = "text"
+	}
+	fmt.Printf("Converting: %s (mode: %s)\n", pdfPath, modeLabel)
 
-	docxPath, err := pdfconv.Convert(pdfPath, enableOCR, func(pct float64) {
+	docxPath, err := pdfconv.Convert(pdfPath, mode, func(pct float64) {
 		const barWidth = 40
 		filled := int(pct * float64(barWidth))
 		bar := ""

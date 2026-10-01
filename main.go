@@ -140,7 +140,11 @@ func main() {
 				})
 
 				baseProgress := float64(i) / float64(total)
-				_, err := pdfconv.Convert(f.path, ocrCheck.Checked, func(pct float64) {
+				mode := pdfconv.ModeImage
+				if ocrCheck.Checked {
+					mode = pdfconv.ModeText
+				}
+				_, err := pdfconv.Convert(f.path, mode, func(pct float64) {
 					// each file contributes 1/total to overall progress
 					overall := baseProgress + pct/float64(total)
 					fyne.Do(func() {

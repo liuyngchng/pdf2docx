@@ -15,10 +15,20 @@ import (
 	"github.com/gen2brain/go-fitz"
 )
 
-// Convert converts a PDF file to docx file(s), calling progressFn with
-// completion ratio (0.0–1.0) after each page.
-// If enableOCR is true and models are available, also produces name.ocr.docx.
-func Convert(pdfPath string, enableOCR bool, progressFn func(float64)) (string, error) {
+// ConvertMode selects the conversion strategy.
+type ConvertMode int
+
+const (
+	// ModeImage renders each page as a JPEG and embeds it in a DOCX (always works).
+	ModeImage ConvertMode = iota
+	// ModeText extracts text via MuPDF for pages with a text layer, and falls back
+	// to OCR for image-only (scanned) pages.
+	ModeText
+)
+
+// Convert converts a PDF file to a DOCX, calling progressFn with completion
+// ratio (0.0–1.0) after each page.
+func Convert(pdfPath string, mode ConvertMode, progressFn func(float64)) (string, error) {
 	doc, err := fitz.New(pdfPath)
 	if err != nil {
 		return "", fmt.Errorf("open PDF: %w", err)
@@ -30,28 +40,21 @@ func Convert(pdfPath string, enableOCR bool, progressFn func(float64)) (string, 
 		return "", fmt.Errorf("PDF has no pages")
 	}
 
+	switch mode {
+	case ModeImage:
+		return convertToImage(doc, pdfPath, numPages, progressFn)
+	case ModeText:
+		return convertToText(doc, pdfPath, numPages, progressFn)
+	default:
+		return "", fmt.Errorf("unknown convert mode: %d", mode)
+	}
+}
+
+// ── Image mode (screenshot) ─────────────────────────────────────────────────
+
+func convertToImage(doc *fitz.Document, pdfPath string, numPages int, progressFn func(float64)) (string, error) {
 	const dpi = 150.0
 	db := &docxBuilder{}
-
-	// OCR setup
-	var ocrEngine *ocr.Engine
-	var ocrDB *textDocxBuilder
-	baseDir, _ := os.Getwd() // fallback
-	if exe, err := os.Executable(); err == nil {
-		baseDir = filepath.Dir(exe)
-	}
-	if enableOCR && ocr.CheckModels(baseDir) {
-		var loadErr error
-		ocrEngine, loadErr = ocr.NewEngineWithConfig(ocr.ModelsDir(baseDir), ocr.DefaultConfig())
-		if loadErr != nil {
-			// Log but continue — screenshot version still works
-			fmt.Fprintf(os.Stderr, "OCR engine load failed: %v\n", loadErr)
-			ocrEngine = nil
-		} else {
-			ocrDB = &textDocxBuilder{}
-			defer ocrEngine.Release()
-		}
-	}
 
 	for i := 0; i < numPages; i++ {
 		img, err := doc.ImageDPI(i, dpi)
@@ -65,31 +68,92 @@ func Convert(pdfPath string, enableOCR bool, progressFn func(float64)) (string, 
 		}
 		db.add(jpgData, w, h)
 
-		// OCR on this page
-		if ocrEngine != nil {
+		progressFn(float64(i+1) / float64(numPages))
+	}
+
+	docxPath := outputPath(pdfPath)
+	if err := saveDocx(docxPath, db); err != nil {
+		return "", fmt.Errorf("save docx: %w", err)
+	}
+	return docxPath, nil
+}
+
+// ── Text mode (extract or OCR) ──────────────────────────────────────────────
+
+func convertToText(doc *fitz.Document, pdfPath string, numPages int, progressFn func(float64)) (string, error) {
+	db := &textDocxBuilder{}
+
+	// OCR engine is lazily initialised when a page has no text.
+	var ocrEngine *ocr.Engine
+
+	for i := 0; i < numPages; i++ {
+		pageText, err := doc.Text(i)
+		if err != nil {
+			return "", fmt.Errorf("extract text page %d: %w", i+1, err)
+		}
+
+		lines := nonEmptyLines(pageText)
+		if len(lines) > 0 {
+			// This page has a text layer — use it directly.
+			db.addPage(lines)
+		} else {
+			// No text layer — fall back to OCR.
+			if ocrEngine == nil {
+				ocrEngine, err = initOCREngine()
+				if err != nil {
+					return "", fmt.Errorf("page %d has no text layer and OCR is not available: %w", i+1, err)
+				}
+				defer ocrEngine.Release()
+			}
+
+			img, err := doc.ImageDPI(i, 150)
+			if err != nil {
+				return "", fmt.Errorf("render page %d for OCR: %w", i+1, err)
+			}
+
 			ocrTexts := runOCRPage(ocrEngine, img)
-			ocrDB.addPage(ocrTexts)
+			db.addPage(ocrTexts)
 		}
 
 		progressFn(float64(i+1) / float64(numPages))
 	}
 
-	// Save screenshot DOCX
-	docxPath := outputPath(pdfPath)
-	if err := saveDocx(docxPath, db); err != nil {
-		return "", fmt.Errorf("save docx: %w", err)
+	docxPath := textOutputPath(pdfPath)
+	if err := saveTextDocx(docxPath, db); err != nil {
+		return "", fmt.Errorf("save text docx: %w", err)
 	}
-
-	// Save OCR text DOCX
-	if ocrDB != nil {
-		ocrPath := ocrOutputPath(pdfPath)
-		if err := saveTextDocx(ocrPath, ocrDB); err != nil {
-			fmt.Fprintf(os.Stderr, "OCR docx save failed: %v\n", err)
-		}
-	}
-
 	return docxPath, nil
 }
+
+// nonEmptyLines splits text by newlines and returns only non-blank lines.
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// initOCREngine loads the PaddleOCR detection + recognition models.
+func initOCREngine() (*ocr.Engine, error) {
+	baseDir, _ := os.Getwd()
+	if exe, err := os.Executable(); err == nil {
+		baseDir = filepath.Dir(exe)
+	}
+	if !ocr.CheckModels(baseDir) {
+		return nil, fmt.Errorf("OCR models not found in %s", ocr.ModelsDir(baseDir))
+	}
+	engine, err := ocr.NewEngineWithConfig(ocr.ModelsDir(baseDir), ocr.DefaultConfig())
+	if err != nil {
+		return nil, fmt.Errorf("load OCR engine: %w", err)
+	}
+	return engine, nil
+}
+
+// ── OCR page helper ─────────────────────────────────────────────────────────
 
 func runOCRPage(engine *ocr.Engine, img *image.RGBA) []string {
 	mat := ocr.NewMatFromRGBA(img)
@@ -105,7 +169,6 @@ func runOCRPage(engine *ocr.Engine, img *image.RGBA) []string {
 	}
 
 	// Clean and merge recognized text lines.
-	// Join adjacent text lines on the same row into single paragraphs.
 	var cleaned []string
 	for _, l := range pageText.Lines {
 		t := cleanOCRLine(l.Text)
@@ -116,6 +179,8 @@ func runOCRPage(engine *ocr.Engine, img *image.RGBA) []string {
 	}
 	return cleaned
 }
+
+// ── OCR text cleanup ────────────────────────────────────────────────────────
 
 // Separator artifacts produced by the PP-OCR/CRNN CTC decoder: the model
 // often emits ASCII hyphens with whitespace between every character in a
@@ -146,6 +211,8 @@ func cleanOCRLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// ── JPEG encode ─────────────────────────────────────────────────────────────
+
 func encodeJPEG(img *image.RGBA) ([]byte, int, int, error) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
@@ -154,11 +221,20 @@ func encodeJPEG(img *image.RGBA) ([]byte, int, int, error) {
 	return buf.Bytes(), img.Bounds().Dx(), img.Bounds().Dy(), nil
 }
 
+// ── Output paths ────────────────────────────────────────────────────────────
+
 func outputPath(pdfPath string) string {
 	dir := filepath.Dir(pdfPath)
 	base := filepath.Base(pdfPath)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 	return filepath.Join(dir, name+".docx")
+}
+
+func textOutputPath(pdfPath string) string {
+	dir := filepath.Dir(pdfPath)
+	base := filepath.Base(pdfPath)
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	return filepath.Join(dir, name+".text.docx")
 }
 
 func ocrOutputPath(pdfPath string) string {

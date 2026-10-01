@@ -4,7 +4,8 @@
 // Go CGO calls these via extern "C" functions. No Go code in this file.
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/geometry/2d.hpp>
+// getPerspectiveTransform was moved to opencv2/geometry/2d.hpp in OpenCV 4.7+.
+// Keep it in imgproc.hpp for compatibility with 4.6.
 #include <cstdint>
 #include <cstring>
 

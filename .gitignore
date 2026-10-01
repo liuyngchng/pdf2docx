@@ -2,6 +2,10 @@
 build/*
 dist/*
 
+# Compiled binaries (may land at repo root from ad-hoc builds)
+server
+cli
+
 # Go
 vendor/
 
