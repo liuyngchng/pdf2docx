@@ -119,13 +119,11 @@ func main() {
 		prefs.SetBool("screenshotMode", enabled)
 		updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
 	})
-	screenshotCheck.SetChecked(prefs.BoolWithFallback("screenshotMode", true))
 
 	textCheck = widget.NewCheck("生成文字版 (.text.docx)", func(enabled bool) {
 		prefs.SetBool("textMode", enabled)
 		updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
 	})
-	textCheck.SetChecked(prefs.BoolWithFallback("textMode", true))
 
 	var textHint *widget.Label
 	if modelsExist {
@@ -213,6 +211,11 @@ func main() {
 		}()
 	})
 	convertBtn.Disable()
+
+	// 恢复用户上次的选择（必须在 convertBtn 创建后调用，否则回调里
+	// updateConvertBtn 会拿到 nil 的 convertBtn）。
+	screenshotCheck.SetChecked(prefs.BoolWithFallback("screenshotMode", true))
+	textCheck.SetChecked(prefs.BoolWithFallback("textMode", true))
 
 	convertBar := container.NewVBox(
 		statusLabel,
