@@ -5,7 +5,11 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 // getPerspectiveTransform was moved to opencv2/geometry/2d.hpp in OpenCV 4.7+.
-// Keep it in imgproc.hpp for compatibility with 4.6.
+// minAreaRect was also moved there in OpenCV 5.
+// geometry/2d.hpp does not exist in OpenCV 4.6 (Ubuntu 24.04), so guard it.
+#if CV_VERSION_MAJOR >= 5 || (CV_VERSION_MAJOR == 4 && CV_VERSION_MINOR >= 7)
+#include <opencv2/geometry/2d.hpp>
+#endif
 #include <cstdint>
 #include <cstring>
 
