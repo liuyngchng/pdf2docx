@@ -1,41 +1,40 @@
 @echo off
-chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 :: ================================================================
-:: build.bat - Windows OCR 版本构建脚本
+:: build.bat - Windows OCR �汾�����ű�
 ::
-:: 在 Windows 上构建带 OCR 支持的 pdf2docx.exe。
-:: 需要安装 MSYS2 (https://www.msys2.org/)。
+:: �� Windows �Ϲ����� OCR ֧�ֵ� pdf2docx.exe��
+:: ��Ҫ��װ MSYS2 (https://www.msys2.org/)��
 ::
-:: MSYS2 安装后，打开 "MSYS2 UCRT64" 终端，执行一次:
+:: MSYS2 ��װ�󣬴� "MSYS2 UCRT64" �նˣ�ִ��һ��:
 ::   pacman -Syu
-:: 然后关闭终端，再打开再执行一次:
+:: Ȼ��ر��նˣ��ٴ���ִ��һ��:
 ::   pacman -Su
-:: 之后就可以运行本脚本。
+:: ֮��Ϳ������б��ű���
 ::
-:: 本脚本可在 cmd 或 PowerShell 中直接运行，不要求从 MSYS2 终端启动。
+:: ���ű����� cmd �� PowerShell ��ֱ�����У���Ҫ��� MSYS2 �ն�������
 :: ================================================================
 
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
-:: --- 找到 MSYS2 ---
+:: --- �ҵ� MSYS2 ---
 set "MSYS2="
 if exist "C:\msys64\ucrt64.exe"      set "MSYS2=C:\msys64"
 if exist "D:\msys64\ucrt64.exe"      set "MSYS2=D:\msys64"
 if exist "%USERPROFILE%\msys64\ucrt64.exe" set "MSYS2=%USERPROFILE%\msys64"
 
 if "%MSYS2%"=="" (
-    echo [ERROR] 找不到 MSYS2 安装目录。
-    echo 常见位置: C:\msys64, D:\msys64, %%USERPROFILE%%\msys64
-    echo 请从 https://www.msys2.org/ 下载安装 MSYS2。
+    echo [ERROR] �Ҳ��� MSYS2 ��װĿ¼��
+    echo ����λ��: C:\msys64, D:\msys64, %%USERPROFILE%%\msys64
+    echo ��� https://www.msys2.org/ ���ذ�װ MSYS2��
     exit /b 1
 )
 
 echo [INFO] MSYS2 found at: %MSYS2%
 
-:: MSYS2 里的 bash / pacman 路径
+:: MSYS2 ��� bash / pacman ·��
 set "BASH=%MSYS2%\usr\bin\bash.exe"
 set "PACMAN=%MSYS2%\usr\bin\pacman.exe"
 
@@ -44,23 +43,23 @@ if not exist "%BASH%" (
     exit /b 1
 )
 
-:: --- 确保 MSYS2 pacman 密钥正常 ---
+:: --- ȷ�� MSYS2 pacman ��Կ���� ---
 echo.
 echo === Step 1: Check/install MSYS2 packages ===
 echo.
 
-:: 先更新 pacman 数据库（仅第一次需要）
+:: �ȸ��� pacman ���ݿ⣨����һ����Ҫ��
 "%BASH%" -lc "pacman -Sy --noconfirm 2>/dev/null || true"
 
-:: 安装 UCRT64 编译工具链 + OpenCV
-:: --needed 表示已安装的跳过，不会重复装
-set "PKGS=mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-opencv mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-cmake"
+:: ��װ UCRT64 ���빤���� + OpenCV
+:: --needed ��ʾ�Ѱ�װ�������������ظ�װ
+set "PKGS=mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-opencv mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-tools-git"
 
 echo   Installing: %PKGS%
 "%BASH%" -lc "pacman -S --needed --noconfirm %PKGS%"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] pacman install failed.
-    echo 请手动打开 "MSYS2 UCRT64" 终端，执行:
+    echo ���ֶ��� "MSYS2 UCRT64" �նˣ�ִ��:
     echo   pacman -Syu
     echo   pacman -S --needed %PKGS%
     exit /b 1
@@ -68,14 +67,25 @@ if %ERRORLEVEL% neq 0 (
 
 echo [OK] Packages ready.
 
-:: --- 下载/准备 Windows 版 onnxruntime ---
+:: OpenCV 5 �İ�װֻ�ṩ opencv5.pc������ opencv.go ����д���� opencv4��
+:: �� pkgconfig Ŀ¼���� opencv4.pc -> opencv5.pc ���������ӡ�
+if not exist "%MSYS2%\ucrt64\lib\pkgconfig\opencv4.pc" (
+    mklink "%MSYS2%\ucrt64\lib\pkgconfig\opencv4.pc" "%MSYS2%\ucrt64\lib\pkgconfig\opencv5.pc" >nul 2>&1
+    if errorlevel 1 (
+        :: mklink ��Ҫ����ԱȨ�ޣ�ʧ��ʱ��Ϊ�ļ�����
+        copy /Y "%MSYS2%\ucrt64\lib\pkgconfig\opencv5.pc" "%MSYS2%\ucrt64\lib\pkgconfig\opencv4.pc" >nul
+    )
+)
+
+:: --- ����/׼�� Windows �� onnxruntime ---
 echo.
 echo === Step 2: Prepare onnxruntime for Windows ===
 
 set "ORT_DIR=%SCRIPT_DIR%build\deps\onnxruntime\win-x64"
-set "ORT_VER=1.21.1"
+:: 1.21.1 �� Windows Ԥ���� zip����Դ�룩��������Ԥ������� 1.22.0
+set "ORT_VER=1.22.0"
 
-:: 检查是否已有完整文件
+:: ����Ƿ����������ļ�
 if exist "%ORT_DIR%\include\onnxruntime_c_api.h" (
     if exist "%ORT_DIR%\lib\libonnxruntime.a" (
         if exist "%ORT_DIR%\bin\onnxruntime.dll" (
@@ -85,7 +95,7 @@ if exist "%ORT_DIR%\include\onnxruntime_c_api.h" (
     )
 )
 
-:: 下载 onnxruntime Windows 预编译包
+:: ���� onnxruntime Windows Ԥ�����
 set "ORT_ZIP=%SCRIPT_DIR%build\deps\onnxruntime-win-x64-%ORT_VER%.zip"
 set "ORT_URL=https://github.com/microsoft/onnxruntime/releases/download/v%ORT_VER%/onnxruntime-win-x64-%ORT_VER%.zip"
 
@@ -94,7 +104,7 @@ if not exist "%ORT_ZIP%" (
     powershell -Command "& { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%ORT_URL%' -OutFile '%ORT_ZIP%'; }"
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Download failed: %ORT_URL%
-        echo 请手动下载并解压到: %ORT_DIR%
+        echo ���ֶ����ز���ѹ��: %ORT_DIR%
         exit /b 1
     )
     echo [OK] Downloaded.
@@ -102,18 +112,18 @@ if not exist "%ORT_ZIP%" (
 
 echo   Extracting ...
 mkdir "%ORT_DIR%" 2>nul
-:: 用 PowerShell 解压（Windows 自带，无需额外工具）
+:: �� PowerShell ��ѹ��Windows �Դ���������⹤�ߣ�
 powershell -Command "& { Expand-Archive -Path '%ORT_ZIP%' -DestinationPath '%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp' -Force; }"
-:: onnxruntime zip 解压后内容在 onnxruntime-win-x64-%ORT_VER%/ 目录下
-:: 移动到目标位置
+:: onnxruntime zip ��ѹ�������� onnxruntime-win-x64-%ORT_VER%/ Ŀ¼��
+:: �ƶ���Ŀ��λ��
 set "ORT_EXTRACTED=%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp\onnxruntime-win-x64-%ORT_VER%"
 if not exist "%ORT_EXTRACTED%" (
-    :: 有些版本解压后直接平铺
+    :: ��Щ�汾��ѹ��ֱ��ƽ��
     echo   Checking extracted structure...
     dir "%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
 )
 
-:: 只拷贝需要的: include/, lib/onnxruntime.lib, lib/onnxruntime.dll
+:: ֻ������Ҫ��: include/, lib/onnxruntime.lib, lib/onnxruntime.dll
 mkdir "%ORT_DIR%\include" 2>nul
 mkdir "%ORT_DIR%\lib" 2>nul
 mkdir "%ORT_DIR%\bin" 2>nul
@@ -122,24 +132,21 @@ xcopy /Y /Q "%ORT_EXTRACTED%\include\*" "%ORT_DIR%\include\" >nul 2>&1
 copy /Y "%ORT_EXTRACTED%\lib\onnxruntime.lib" "%ORT_DIR%\lib\" >nul 2>&1
 copy /Y "%ORT_EXTRACTED%\lib\onnxruntime.dll" "%ORT_DIR%\bin\" >nul 2>&1
 
-:: 如果 onnxruntime.dll 在 bin 目录
+:: ��� onnxruntime.dll �� bin Ŀ¼
 if not exist "%ORT_DIR%\bin\onnxruntime.dll" (
     copy /Y "%ORT_EXTRACTED%\bin\onnxruntime.dll" "%ORT_DIR%\bin\" >nul 2>&1
 )
 
-:: 清理临时目录
+:: ������ʱĿ¼
 rmdir /S /Q "%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
 
-:: --- 用 gendef + dlltool 生成 MinGW 兼容的导入库 ---
-:: MSVC 的 .lib 不能被 MinGW 链接，需要从 DLL 生成 .def 再生成 .a
+:: --- �� gendef + dlltool ���� MinGW ���ݵĵ���� ---
+:: MSVC �� .lib ���ܱ� MinGW ���ӣ���Ҫ�� DLL ���� .def ������ .a
 echo   Generating MinGW import library ...
-"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && \
-    export PATH=/ucrt64/bin:\$PATH && \
-    gendef - build/deps/onnxruntime/win-x64/bin/onnxruntime.dll > build/deps/onnxruntime/win-x64/lib/onnxruntime.def 2>/dev/null && \
-    dlltool -d build/deps/onnxruntime/win-x64/lib/onnxruntime.def -l build/deps/onnxruntime/win-x64/lib/libonnxruntime.a -D build/deps/onnxruntime/win-x64/bin/onnxruntime.dll"
+"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && export PATH=/ucrt64/bin:\$PATH && gendef - build/deps/onnxruntime/win-x64/bin/onnxruntime.dll > build/deps/onnxruntime/win-x64/lib/onnxruntime.def 2>/dev/null && dlltool -d build/deps/onnxruntime/win-x64/lib/onnxruntime.def -l build/deps/onnxruntime/win-x64/lib/libonnxruntime.a -D build/deps/onnxruntime/win-x64/bin/onnxruntime.dll"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] gendef/dlltool failed.
-    echo 请确认 MSYS2 中已安装 binutils: pacman -S --needed mingw-w64-ucrt-x86_64-binutils
+    echo 请确认 MSYS2 中已安装 binutils 和 tools: pacman -S --needed mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-tools-git
     exit /b 1
 )
 
@@ -147,21 +154,13 @@ echo [OK] onnxruntime MinGW import lib ready.
 
 :ort_done
 
-:: --- 编译 ---
+:: --- ���� ---
 echo.
 echo === Step 3: Build pdf2docx.exe (Windows OCR) ===
 
-"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && \
-    export PATH=/ucrt64/bin:\$PATH && \
-    export CGO_ENABLED=1 && \
-    export GOOS=windows && \
-    export GOARCH=amd64 && \
-    export GOPROXY=https://goproxy.cn,direct && \
-    export CGO_CXXFLAGS='-std=c++17' && \
-    mkdir -p dist && \
-    echo '  Building...' && \
-    go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
-    echo '  Build OK.'"
+mkdir dist 2>nul
+
+"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && export PATH=/ucrt64/bin:\$PATH && export GOROOT=/ucrt64/lib/go && export CGO_ENABLED=1 && export GOOS=windows && export GOARCH=amd64 && export GOPROXY=https://goproxy.cn,direct && export CGO_CXXFLAGS='-std=c++17' && echo '  Building...' && go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && echo '  Build OK.'"
 
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.
@@ -170,21 +169,21 @@ if %ERRORLEVEL% neq 0 (
 
 echo [OK] pdf2docx.exe built.
 
-:: --- 收集 DLL ---
+:: --- �ռ� DLL ---
 echo.
 echo === Step 4: Collect DLL dependencies ===
 
 set "DIST_DIR=%SCRIPT_DIR%dist"
 set "PKG_DIR=%DIST_DIR%\pdf2docx-windows-amd64"
 
-:: 清理旧目录
+:: ������Ŀ¼
 if exist "%PKG_DIR%" rmdir /S /Q "%PKG_DIR%"
 mkdir "%PKG_DIR%"
 
-:: 复制 exe
+:: ���� exe
 copy /Y "%DIST_DIR%\pdf2docx.exe" "%PKG_DIR%\" >nul
 
-:: 用 MSYS2 的 bash + ldd 找出所有需要的 DLL
+:: �� MSYS2 �� bash + ldd �ҳ�������Ҫ�� DLL
 echo   Finding DLL dependencies...
 "%BASH%" -lc "
     cd \$(cygpath '%SCRIPT_DIR%')
@@ -193,12 +192,12 @@ echo   Finding DLL dependencies...
     exe_file=dist/pdf2docx.exe
     pkg_dir=dist/pdf2docx-windows-amd64
 
-    # 需要复制的 DLL 列表
+    # ��Ҫ���Ƶ� DLL �б�
     DLLS=\$(
         ldd \"\$exe_file\" 2>/dev/null | grep '/ucrt64/bin/' | awk '{print \$3}' | sort -u
     )
 
-    # 总是包含 onnxruntime（它不是通过 MSYS2 安装的）
+    # ���ǰ��� onnxruntime��������ͨ�� MSYS2 ��װ�ģ�
     ort_bin='build/deps/onnxruntime/win-x64/bin/onnxruntime.dll'
 
     echo \"  Copying DLLs...\"
@@ -215,12 +214,12 @@ echo   Finding DLL dependencies...
     echo \"  DLLs copied.\"
 "
 
-:: --- 复制 models ---
+:: --- ���� models ---
 echo   Copying models...
 xcopy /E /I /Q /Y "%SCRIPT_DIR%models" "%PKG_DIR%\models\" >nul
 echo   models/ copied.
 
-:: --- 打包 ---
+:: --- ��� ---
 echo.
 echo === Step 5: Package ===
 
@@ -233,7 +232,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-:: 获取文件大小
+:: ��ȡ�ļ���С
 for %%A in ("%ZIP_NAME%") do set "ZIP_SIZE=%%~zA"
 set /a ZIP_SIZE_MB=%ZIP_SIZE%/1048576
 
@@ -242,17 +241,17 @@ echo ================================================================
 echo Build complete!
 echo   Output: %ZIP_NAME%  (~%ZIP_SIZE_MB% MB)
 echo.
-echo 内容:
+echo ����:
 echo   pdf2docx.exe
-echo   models/ (OCR 模型)
-echo   *.dll (运行时动态库)
+echo   models/ (OCR ģ��)
+echo   *.dll (����ʱ��̬��)
 echo.
-echo 解压后在同一目录运行 pdf2docx.exe 即可使用 OCR。
+echo ��ѹ����ͬһĿ¼���� pdf2docx.exe ����ʹ�� OCR��
 echo ================================================================
 
-:: 清理构建临时文件（保留 exe，方便调试）
+:: ����������ʱ�ļ������� exe��������ԣ�
 echo.
-echo [INFO] 中间产物保留在 %PKG_DIR%\
+echo [INFO] �м���ﱣ���� %PKG_DIR%\
 echo [INFO] run "rmdir /S /Q %PKG_DIR%" to clean up
 
 endlocal

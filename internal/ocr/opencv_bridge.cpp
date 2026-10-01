@@ -4,6 +4,7 @@
 // Go CGO calls these via extern "C" functions. No Go code in this file.
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/geometry/2d.hpp>
 #include <cstdint>
 #include <cstring>
 
