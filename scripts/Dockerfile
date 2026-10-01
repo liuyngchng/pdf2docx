@@ -3,7 +3,7 @@
 #   System packages + Go toolchain only.
 #
 # Go module cache is mapped from the host at build time via a volume
-# (see build.sh), so dependencies are never downloaded inside the image
+# (see build_cli.sh), so dependencies are never downloaded inside the image
 # and rebuilds stay fast.
 #
 # go-fitz bundles pre-built MuPDF static libs for ALL platforms
@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Fyne: Wayland
     libwayland-dev wayland-protocols libxkbcommon-dev \
     # OCR: OpenCV
-    libopencv-dev \
+    libopencv-dev patchelf \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Go toolchain (from host-cached tarball) ──────────────────────

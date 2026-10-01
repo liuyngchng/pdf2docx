@@ -29,4 +29,4 @@ vendor
 
 # 旧的 GUI 构建脚本（server 用不到）
 build.sh
-build.bat
+scripts/build.bat

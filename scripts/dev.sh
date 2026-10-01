@@ -3,14 +3,14 @@
 # Maps the project directory into /workspace, same as build_cli.sh.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
-IMAGE="pdf2docx_dev:latest"
+IMAGE="pdf2docx_build:latest"
 
 # Build dev image if not present
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building dev image $IMAGE ..."
-  docker build -t "$IMAGE" -f Dockerfile.dev .
+  docker build -t "$IMAGE" -f scripts/Dockerfile .
   echo "Done."
 fi
 

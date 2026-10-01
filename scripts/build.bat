@@ -18,7 +18,8 @@ setlocal enabledelayedexpansion
 :: ================================================================
 
 set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
+set "ROOT_DIR=%SCRIPT_DIR%..\"
+cd /d "%ROOT_DIR%"
 
 :: --- Locate MSYS2 ---
 set "MSYS2="
@@ -82,7 +83,7 @@ if not exist "%MSYS2%\ucrt64\lib\pkgconfig\opencv4.pc" (
 echo.
 echo === Step 2: Prepare onnxruntime for Windows ===
 
-set "ORT_DIR=%SCRIPT_DIR%build\deps\onnxruntime\win-x64"
+set "ORT_DIR=%ROOT_DIR%build\deps\onnxruntime\win-x64"
 :: onnxruntime Windows prebuilt version
 set "ORT_VER=1.22.0"
 
@@ -97,7 +98,7 @@ if exist "%ORT_DIR%\include\onnxruntime_c_api.h" (
 )
 
 :: Download onnxruntime Windows prebuilt package
-set "ORT_ZIP=%SCRIPT_DIR%build\deps\onnxruntime-win-x64-%ORT_VER%.zip"
+set "ORT_ZIP=%ROOT_DIR%build\deps\onnxruntime-win-x64-%ORT_VER%.zip"
 set "ORT_URL=https://github.com/microsoft/onnxruntime/releases/download/v%ORT_VER%/onnxruntime-win-x64-%ORT_VER%.zip"
 
 if not exist "%ORT_ZIP%" (
@@ -114,14 +115,14 @@ if not exist "%ORT_ZIP%" (
 echo   Extracting ...
 mkdir "%ORT_DIR%" 2>nul
 :: Use PowerShell to extract (built-in, no extra tools needed)
-powershell -Command "& { Expand-Archive -Path '%ORT_ZIP%' -DestinationPath '%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp' -Force; }"
+powershell -Command "& { Expand-Archive -Path '%ORT_ZIP%' -DestinationPath '%ROOT_DIR%build\deps\onnxruntime\win-x64-tmp' -Force; }"
 :: onnxruntime zip extracts to onnxruntime-win-x64-%ORT_VER%/ directory
 :: Move to target location
-set "ORT_EXTRACTED=%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp\onnxruntime-win-x64-%ORT_VER%"
+set "ORT_EXTRACTED=%ROOT_DIR%build\deps\onnxruntime\win-x64-tmp\onnxruntime-win-x64-%ORT_VER%"
 if not exist "%ORT_EXTRACTED%" (
     :: Some versions extract flat
     echo   Checking extracted structure...
-    dir "%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
+    dir "%ROOT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
 )
 
 :: Copy required: include/, lib/onnxruntime.lib, lib/onnxruntime.dll
@@ -139,12 +140,12 @@ if not exist "%ORT_DIR%\bin\onnxruntime.dll" (
 )
 
 :: Clean up temp directory
-rmdir /S /Q "%SCRIPT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
+rmdir /S /Q "%ROOT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
 
 :: --- Use gendef + dlltool to generate MinGW-compatible import library ---
 :: MSVC .lib cannot be linked by MinGW, need to generate .def from DLL then .a
 echo   Generating MinGW import library ...
-"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && export PATH=/ucrt64/bin:\$PATH && gendef - build/deps/onnxruntime/win-x64/bin/onnxruntime.dll > build/deps/onnxruntime/win-x64/lib/onnxruntime.def 2>/dev/null && dlltool -d build/deps/onnxruntime/win-x64/lib/onnxruntime.def -l build/deps/onnxruntime/win-x64/lib/libonnxruntime.a -D build/deps/onnxruntime/win-x64/bin/onnxruntime.dll"
+"%BASH%" -lc "cd $(cygpath '%ROOT_DIR%') && export PATH=/ucrt64/bin:\$PATH && gendef - build/deps/onnxruntime/win-x64/bin/onnxruntime.dll > build/deps/onnxruntime/win-x64/lib/onnxruntime.def 2>/dev/null && dlltool -d build/deps/onnxruntime/win-x64/lib/onnxruntime.def -l build/deps/onnxruntime/win-x64/lib/libonnxruntime.a -D build/deps/onnxruntime/win-x64/bin/onnxruntime.dll"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] gendef/dlltool failed.
     echo Please ensure MSYS2 has binutils and tools installed: pacman -S --needed mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-tools-git
@@ -161,7 +162,7 @@ echo === Step 3: Build pdf2docx.exe (Windows OCR) ===
 
 mkdir dist 2>nul
 
-"%BASH%" -lc "cd $(cygpath '%SCRIPT_DIR%') && export PATH=/ucrt64/bin:\$PATH && export GOROOT=/ucrt64/lib/go && export CGO_ENABLED=1 && export GOOS=windows && export GOARCH=amd64 && export GOPROXY=https://goproxy.cn,direct && export CGO_CXXFLAGS='-std=c++17' && echo '  Building...' && go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && echo '  Build OK.'"
+"%BASH%" -lc "cd $(cygpath '%ROOT_DIR%') && export PATH=/ucrt64/bin:\$PATH && export GOROOT=/ucrt64/lib/go && export CGO_ENABLED=1 && export GOOS=windows && export GOARCH=amd64 && export GOPROXY=https://goproxy.cn,direct && export CGO_CXXFLAGS='-std=c++17' && echo '  Building...' && go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && echo '  Build OK.'"
 
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.
@@ -174,7 +175,7 @@ echo [OK] pdf2docx.exe built.
 echo.
 echo === Step 4: Collect DLL dependencies ===
 
-set "DIST_DIR=%SCRIPT_DIR%dist"
+set "DIST_DIR=%ROOT_DIR%dist"
 set "PKG_DIR=%DIST_DIR%\pdf2docx-windows-amd64"
 
 :: Clean old directory
@@ -193,7 +194,7 @@ if %ERRORLEVEL% neq 0 (
 
 :: --- Copy models ---
 echo   Copying models...
-xcopy /E /I /Q /Y "%SCRIPT_DIR%models" "%PKG_DIR%\models\" >nul
+xcopy /E /I /Q /Y "%ROOT_DIR%models" "%PKG_DIR%\models\" >nul
 echo   models/ copied.
 
 :: --- Package ---

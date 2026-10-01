@@ -3,25 +3,26 @@ set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────
 # Build the GUI client binaries (Linux + Windows).
-#   ./build_cli.sh                 # no OCR (original behavior)
-#   ./build_cli.sh --with-ocr      # Linux GUI with OCR (needs OpenCV + onnxruntime)
+#   ./scripts/build_cli.sh                 # Linux GUI with OCR
 #
-# Windows OCR build must be done natively on Windows:
-#   build.bat    (requires MSYS2 UCRT64)
+# Linux binary is built with full OCR support (OpenCV + ONNX Runtime).
+# Windows cross-compile uses -tags noocr (no OpenCV cross-link), but
+# MuPDF text extraction is always available for text-mode DOCX output.
+#
+# Windows native OCR build must be done on Windows:
+#   scripts/build.bat    (requires MSYS2 UCRT64)
 # ────────────────────────────────────────────────────────────────
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-IMAGE="pdf2docx_build:1.0"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+IMAGE="pdf2docx_build:latest"
 
 # ── Usage ───────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'
-用法: ./build_cli.sh [参数...]
+用法: ./scripts/build_cli.sh [参数...]
 
 参数说明:
-  --with-ocr              构建带 OCR 支持的 Linux GUI（需要 OpenCV + onnxruntime，
-                          使用 Dockerfile.dev 镜像）
-  --no-obfuscate          关闭 garble 代码混淆（默认开启）
+  --no-obfuscate          关闭 Windows 构建的 garble 代码混淆（默认开启）
   -x | verbose            输出 go build 的详细编译日志（-x）
   -h | --help             显示本帮助并退出
 
@@ -31,14 +32,13 @@ usage() {
   no_proxy=<url>          设置不走代理的地址列表
 
 示例:
-  ./build_cli.sh                  # 默认构建（无 OCR，开启混淆）
-  ./build_cli.sh --with-ocr       # 构建带 OCR 的 Linux GUI
-  ./build_cli.sh --with-ocr -x    # 带 OCR 且输出详细编译日志
-  ./build_cli.sh --no-obfuscate   # 不混淆构建
+  ./scripts/build_cli.sh                  # 默认构建（Linux OCR + Windows 混淆）
+  ./scripts/build_cli.sh --no-obfuscate   # 不混淆 Windows 构建
 
 说明:
-  Windows 构建始终使用 -tags noocr（交叉编译不支持 Windows OCR）。
-  Windows OCR 版本需在 Windows 上运行 build.bat 编译（需要 MSYS2 UCRT64）。
+  Linux 构建始终集成 OCR（OpenCV + ONNX Runtime），产出含 .so + models 的完整包。
+  Windows 交叉编译始终使用 -tags noocr（不支持 Windows OCR 交叉编译）。
+  Windows OCR 版本需在 Windows 上运行 scripts/build.bat 编译（需要 MSYS2 UCRT64）。
 EOF
 }
 
@@ -48,7 +48,6 @@ HTTPS_PROXY_VAL=""
 NO_PROXY_VAL=""
 GO_BUILD_X=""   # set to "-x" when verbose is requested
 OBFUSCATE=true
-WITH_OCR=false
 for arg in "$@"; do
   case "$arg" in
     http_proxy=*|HTTP_PROXY=*)   HTTP_PROXY_VAL="${arg#*=}" ;;
@@ -56,7 +55,6 @@ for arg in "$@"; do
     no_proxy=*|NO_PROXY=*)       NO_PROXY_VAL="${arg#*=}" ;;
     -x|verbose)                  GO_BUILD_X="-x" ;;
     --no-obfuscate)              OBFUSCATE=false ;;
-    --with-ocr)                  WITH_OCR=true ;;
     -h|--help|help)              usage; exit 0 ;;
     *)                           echo "WARNING: 未知参数 '$arg'，已忽略（用 -h 查看用法）" ;;
   esac
@@ -70,19 +68,8 @@ fi
 # ── 总是输出当前构建参数（日志中可见） ────────────────────────────
 echo ""
 echo "────────────────────────────────────────────────────────"
-echo "  构建参数说明:"
-echo "    --with-ocr         构建带 OCR 支持的 Linux GUI"
-echo "                       需要 OpenCV + onnxruntime (Dockerfile.dev)"
-echo "    --no-obfuscate     关闭 garble 代码混淆（默认开启混淆）"
-echo "    -x | verbose       输出 go build 详细编译日志"
-echo "    -h | --help        显示帮助并退出"
-echo "    http_proxy=<url>   设置 HTTP 代理"
-echo "    https_proxy=<url>  设置 HTTPS 代理"
-echo "    no_proxy=<url>     设置不走代理的地址列表"
-echo "────────────────────────────────────────────────────────"
-echo "  当前参数:"
-echo "    WITH_OCR       = $WITH_OCR"
-echo "    OBFUSCATE      = $OBFUSCATE"
+echo "  构建参数:"
+echo "    OBFUSCATE      = $OBFUSCATE    (仅 Windows 构建)"
 echo "    GO_BUILD_X     = ${GO_BUILD_X:-(未设置)}"
 echo "    HTTP_PROXY     = ${HTTP_PROXY_VAL:-(未设置)}"
 echo "    HTTPS_PROXY    = ${HTTPS_PROXY_VAL:-(未设置)}"
@@ -145,25 +132,9 @@ else
 fi
 
 # ── Build Docker image if missing ────────────────────────────────
-# When obfuscating or OCR is requested, rebuild the image.
-NEEDS_REBUILD=false
-if $WITH_OCR; then
-  # OCR build needs the dev image (includes opencv + g++)
-  IMAGE="pdf2docx_dev:latest"
-  if ! docker image inspect "$IMAGE" &>/dev/null; then
-    echo "Building dev image $IMAGE ..."
-    docker build "${DOCKER_BUILD_ARGS[@]}" -t "$IMAGE" -f Dockerfile.dev .
-    echo "Done."
-  fi
-elif ! docker image inspect "$IMAGE" &>/dev/null; then
-  NEEDS_REBUILD=true
-elif $OBFUSCATE && ! docker run --rm "$IMAGE" command -v garble &>/dev/null; then
-  NEEDS_REBUILD=true
-fi
-
-if $NEEDS_REBUILD; then
+if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building Docker image $IMAGE ..."
-  docker build "${DOCKER_BUILD_ARGS[@]}" --build-arg "GO_VERSION=$GO_VERSION" -t "$IMAGE" -f Dockerfile .
+  docker build "${DOCKER_BUILD_ARGS[@]}" --build-arg "GO_VERSION=$GO_VERSION" -t "$IMAGE" -f scripts/Dockerfile .
   echo "Docker image $IMAGE built"
 else
   echo "Docker image $IMAGE ready"
@@ -178,31 +149,20 @@ COMMON_ENV=(
   -e HOST_GID="$(id -g)"
 )
 
-# ── Obfuscation toggle ────────────────────────────────────────────
-if $OBFUSCATE && ! $WITH_OCR; then
-  BUILD_BIN="garble -literals"
+# ── Obfuscation (Windows only; Linux OCR build cannot use garble) ───
+if $OBFUSCATE; then
+  WIN_BUILD_BIN="garble -literals"
   GARBLE_ENV=(-e GOGARBLE=pdftoword)
-  OBF_LABEL=" (obfuscated)"
+  WIN_OBF_LABEL=" (obfuscated)"
 else
-  BUILD_BIN="go"
+  WIN_BUILD_BIN="go"
   GARBLE_ENV=()
-  OBF_LABEL=""
+  WIN_OBF_LABEL=""
 fi
 
-# ── OCR tags (Linux only) ────────────────────────────────────────
-LINUX_OCR_TAGS=""
-if $WITH_OCR; then
-  LINUX_OCR_TAGS=""
-  LINUX_OBF=""
-else
-  LINUX_OCR_TAGS="-tags noocr"
-  LINUX_OBF=""
-fi
-
-# ── 1. Linux GUI ─────────────────────────────────────────────────
+# ── 1. Linux GUI (always OCR) ────────────────────────────────────
 echo ""
-echo "=== Building pdf2docx (Linux GUI)${OBF_LABEL} ==="
-# Clean dist/ and build, all inside Docker (avoids root-ownership issues).
+echo "=== Building pdf2docx (Linux GUI, OCR) ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -210,7 +170,6 @@ docker run --rm \
   -w /workspace \
   "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
-  ${GARBLE_ENV[@]+"${GARBLE_ENV[@]}"} \
   -e CGO_ENABLED=1 \
   -e GOOS=linux \
   -e GOARCH=amd64 \
@@ -218,44 +177,37 @@ docker run --rm \
   bash -c "
     rm -rf /workspace/dist/*
     mkdir -p /workspace/dist
-    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod ${LINUX_OCR_TAGS} -ldflags='-s -w' -o dist/pdf2docx . && \
+    go build ${GO_BUILD_X} -mod=mod -ldflags='-s -w' -o dist/pdf2docx . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx
   "
 
-# Bundle libonnxruntime.so + OpenCV libs + models for OCR builds.
-# dist/ was cleared inside Docker above, so there are no stale root-owned files.
-if $WITH_OCR; then
-  # Copy onnxruntime from vendored deps (done on host, dist/ is now clean and writable).
-  cp "$SCRIPT_DIR/build/deps/onnxruntime/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
-  echo "  bundled:  dist/libonnxruntime.so"
+# ── Bundle OCR runtime deps ──────────────────────────────────────
+# Copy onnxruntime from vendored deps.
+cp "$SCRIPT_DIR/build/deps/onnxruntime/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
+echo "  bundled:  dist/libonnxruntime.so"
 
-  # Copy OpenCV shared libs (and tbb, their only host-missing dep) from the
-  # dev image into dist/. The binary is linked with -Wl,-rpath,'$ORIGIN' so it
-  # finds them next to itself; the copied .so files get the same rpath so their
-  # own transitive deps (e.g. libtbb) also resolve from dist/.
-  docker run --rm -v "$SCRIPT_DIR":/workspace -w /workspace \
-    -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-    "$IMAGE" bash -c '
-    set -euo pipefail
-    LIBDIR=/usr/lib/x86_64-linux-gnu
-    mkdir -p /workspace/dist
-    for lib in libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12; do
-      cp -L "$LIBDIR/$lib" /workspace/dist/
-      patchelf --set-rpath "\$ORIGIN" "/workspace/dist/$lib"
-      echo "  bundled:  dist/$lib"
-    done
-    chown "$HOST_UID":"$HOST_GID" /workspace/dist/libopencv_*.so.406 /workspace/dist/libtbb.so.12
-  '
+# Copy OpenCV shared libs + patchelf rpath from the build image.
+docker run --rm -v "$SCRIPT_DIR":/workspace -w /workspace \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  "$IMAGE" bash -c '
+  set -euo pipefail
+  LIBDIR=/usr/lib/x86_64-linux-gnu
+  mkdir -p /workspace/dist
+  for lib in libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12; do
+    cp -L "$LIBDIR/$lib" /workspace/dist/
+    patchelf --set-rpath "\$ORIGIN" "/workspace/dist/$lib"
+    echo "  bundled:  dist/$lib"
+  done
+  chown "$HOST_UID":"$HOST_GID" /workspace/dist/libopencv_*.so.406 /workspace/dist/libtbb.so.12
+'
 
-  # Copy OCR model files so the GUI can find them at runtime.
-  cp -r "$SCRIPT_DIR/models" "$SCRIPT_DIR/dist/models"
-  echo "  bundled:  dist/models/"
-fi
+# Copy OCR model files.
+cp -r "$SCRIPT_DIR/models" "$SCRIPT_DIR/dist/models"
+echo "  bundled:  dist/models/"
 
-# ── 2. Windows GUI ───────────────────────────────────────────────
+# ── 2. Windows GUI (cross-compile, no OCR) ───────────────────────
 echo ""
-echo "=== Building pdf2docx.exe (Windows GUI)${OBF_LABEL} ==="
-# Windows always builds without OCR (no vendored win deps yet).
+echo "=== Building pdf2docx.exe (Windows GUI)${WIN_OBF_LABEL} ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
@@ -272,7 +224,7 @@ docker run --rm \
   "$IMAGE" \
   bash -c "
     rm -rf /workspace/dist/pdf2docx.exe
-    ${BUILD_BIN} build ${GO_BUILD_X} -mod=mod -tags noocr -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
+    ${WIN_BUILD_BIN} build ${GO_BUILD_X} -mod=mod -tags noocr -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && \
     chown \$HOST_UID:\$HOST_GID dist/pdf2docx.exe
   "
 
@@ -289,32 +241,24 @@ ARCHIVE_WIN="pdf2docx-windows-amd64.tar"
 
 rm -f "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" "$SCRIPT_DIR/dist/$ARCHIVE_WIN"
 
-if $WITH_OCR; then
-  cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' \
-    pdf2docx \
-    libonnxruntime.so \
-    libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12 \
-    models/
-  cd "$SCRIPT_DIR"
-  echo "  $ARCHIVE_LINUX  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" | cut -f1)) — Linux OCR 完整包"
+# Linux: always bundle .so + models (OCR version).
+cd "$SCRIPT_DIR/dist"
+tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' \
+  pdf2docx \
+  libonnxruntime.so \
+  libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12 \
+  models/
+cd "$SCRIPT_DIR"
+echo "  $ARCHIVE_LINUX  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" | cut -f1)) — Linux OCR 完整包"
 
-  # Remove loose files, keep only the tar.
-  rm -rf \
-    "$SCRIPT_DIR/dist/pdf2docx" \
-    "$SCRIPT_DIR/dist/libonnxruntime.so" \
-    "$SCRIPT_DIR/dist/libopencv_imgproc.so.406" "$SCRIPT_DIR/dist/libopencv_core.so.406" \
-    "$SCRIPT_DIR/dist/libtbb.so.12" \
-    "$SCRIPT_DIR/dist/models"
-else
-  cd "$SCRIPT_DIR/dist"
-  tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' pdf2docx
-  cd "$SCRIPT_DIR"
-  echo "  $ARCHIVE_LINUX  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" | cut -f1))"
+rm -rf \
+  "$SCRIPT_DIR/dist/pdf2docx" \
+  "$SCRIPT_DIR/dist/libonnxruntime.so" \
+  "$SCRIPT_DIR/dist/libopencv_imgproc.so.406" "$SCRIPT_DIR/dist/libopencv_core.so.406" \
+  "$SCRIPT_DIR/dist/libtbb.so.12" \
+  "$SCRIPT_DIR/dist/models"
 
-  rm -f "$SCRIPT_DIR/dist/pdf2docx"
-fi
-
+# Windows: single exe (text extraction via MuPDF only, no OCR).
 cd "$SCRIPT_DIR/dist"
 tar -cf "$ARCHIVE_WIN" --transform='s,^,pdf2docx-windows-amd64/,' pdf2docx.exe
 cd "$SCRIPT_DIR"
@@ -326,9 +270,6 @@ echo "分发文件（做好了的压缩包）:"
 echo "  dist/$ARCHIVE_LINUX"
 echo "  dist/$ARCHIVE_WIN"
 echo ""
-if $WITH_OCR; then
-  echo "Linux OCR 包内容: pdf2docx + .so 库 + models/ 模型目录"
-  echo "解包后进入 pdf2docx-linux-amd64/ 目录，运行 ./pdf2docx 即可使用 OCR。"
-else
-  echo "Linux 包内容: pdf2docx（独立静态文件，无需额外依赖）"
-fi
+echo "Linux OCR 包内容: pdf2docx + .so 库 + models/ 模型目录"
+echo "解包后进入 pdf2docx-linux-amd64/ 目录，运行 ./pdf2docx 即可使用。"
+echo "Windows 包内容: pdf2docx.exe（支持 MuPDF 文本提取，OCR 请用 scripts/build.bat 原生编译）"

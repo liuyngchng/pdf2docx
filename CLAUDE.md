@@ -11,18 +11,18 @@
 编译、静态检查、测试都必须在 Docker 容器内进行：
 
 ```bash
-# 一键编译（GUI：./build_cli.sh，Server：./build_server.sh）
-./build_cli.sh [--with-ocr]     # 基础版 / OCR 版
+# 一键编译（GUI：./scripts/build_cli.sh，Server：./scripts/build_server.sh）
+./scripts/build_cli.sh     # Linux OCR 版 + Windows 交叉编译
 
 # 进入开发容器，在容器内执行 go build / go vet / go test
-./dev.sh
+./scripts/dev.sh
 # 容器内：
 #   go build ./internal/ocr/
 #   go vet ./internal/...
 ```
 
 - OCR 版依赖 CGO + OpenCV + ONNX Runtime，编译脚本会自动构建/使用
-  `pdf2docx_dev:latest` 镜像（`Dockerfile.dev`）。
+  `pdf2docx_build:latest` 镜像（`scripts/Dockerfile`）。
 - 若只想验证纯 Go 逻辑（不含 CGO/OCR），可用 `CGO_ENABLED=0 go build -tags noocr ...`，
   但 `internal/ocr` 包本身仍需要容器环境才能完整编译。
 

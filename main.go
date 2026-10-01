@@ -37,7 +37,10 @@ func main() {
 	a.Settings().SetTheme(customTheme)
 	w := a.NewWindow("PDF2Word - PDF转Word工具")
 
-	// --- data ---
+	// ── Persistent preferences ──────────────────────────────────────
+	prefs := a.Preferences()
+
+	// ── data ────────────────────────────────────────────────────────
 	var files []pdfFile
 	var converting bool
 
@@ -45,8 +48,22 @@ func main() {
 	var fileList *widget.List
 	var countLabel *widget.Label
 	var convertBtn *widget.Button
+	var screenshotCheck *widget.Check
+	var textCheck *widget.Check
 
-	// --- file list ---
+	// ── OCR model detection (for hint text only) ────────────────────
+	baseDir, _ := os.Getwd()
+	if exe, err := os.Executable(); err == nil {
+		baseDir = filepath.Dir(exe)
+	}
+	modelsExist := ocr.CheckModels(baseDir)
+
+	// Whether at least one output mode is selected.
+	hasOutputMode := func() bool {
+		return screenshotCheck.Checked || textCheck.Checked
+	}
+
+	// ── file list ───────────────────────────────────────────────────
 	fileList = widget.NewList(
 		func() int { return len(files) },
 		func() fyne.CanvasObject {
@@ -63,31 +80,31 @@ func main() {
 				files = append(files[:id], files[id+1:]...)
 				fileList.Refresh()
 				updateCountLabel(countLabel, len(files))
-				updateConvertBtn(convertBtn, len(files), converting)
+				updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
 			}
 		},
 	)
 	fileListScroll := container.NewScroll(fileList)
 	fileListScroll.SetMinSize(fyne.NewSize(0, 200))
 
-	// --- header / controls ---
+	// ── header / controls ───────────────────────────────────────────
 	countLabel = widget.NewLabel("已选文件: 0 个")
 	updateCountLabel(countLabel, 0)
 
 	addBtn := widget.NewButtonWithIcon("添加 PDF 文件", theme.FileIcon(), func() {
-		showFilePicker(w, &files, fileList, countLabel, convertBtn, converting)
+		showFilePicker(w, &files, fileList, countLabel, convertBtn, converting, hasOutputMode)
 	})
 
 	clearBtn := widget.NewButtonWithIcon("清空列表", theme.DeleteIcon(), func() {
 		files = nil
 		fileList.Refresh()
 		updateCountLabel(countLabel, 0)
-		updateConvertBtn(convertBtn, 0, converting)
+		updateConvertBtn(convertBtn, 0, converting, hasOutputMode())
 	})
 
 	topBar := container.NewBorder(nil, nil, addBtn, clearBtn, countLabel)
 
-	// --- bottom ---
+	// ── bottom ──────────────────────────────────────────────────────
 	statusLabel := widget.NewLabel("请添加 PDF 文件")
 	statusLabel.Alignment = fyne.TextAlignCenter
 
@@ -97,38 +114,46 @@ func main() {
 	outputLabel := widget.NewLabel("")
 	outputLabel.Wrapping = fyne.TextWrapBreak
 
-	// --- OCR toggle ---
-	baseDir, _ := os.Getwd()
-	if exe, err := os.Executable(); err == nil {
-		baseDir = filepath.Dir(exe)
-	}
-	modelsExist := ocr.CheckModels(baseDir)
-	var ocrCheck *widget.Check
-	var ocrHint *widget.Label
-
-	ocrCheck = widget.NewCheck("生成文字版 (.text.docx)", func(enabled bool) {
-		// stored; read when conversion starts
+	// ── Output mode checkboxes ──────────────────────────────────────
+	screenshotCheck = widget.NewCheck("生成截图版 (.docx)", func(enabled bool) {
+		prefs.SetBool("screenshotMode", enabled)
+		updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
 	})
-	if !modelsExist {
-		ocrCheck.Disable()
-		ocrHint = widget.NewLabel("（未检测到 OCR 模型目录 models/）")
+	screenshotCheck.SetChecked(prefs.BoolWithFallback("screenshotMode", true))
+
+	textCheck = widget.NewCheck("生成文字版 (.text.docx)", func(enabled bool) {
+		prefs.SetBool("textMode", enabled)
+		updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
+	})
+	textCheck.SetChecked(prefs.BoolWithFallback("textMode", true))
+
+	var textHint *widget.Label
+	if modelsExist {
+		textHint = widget.NewLabel("（已检测到 OCR 模型，扫描件也能识别文字）")
 	} else {
-		ocrHint = widget.NewLabel("（已检测到 OCR 模型，可开启）")
+		textHint = widget.NewLabel("（未检测到 OCR 模型，扫描件无法识别文字；有文字层的 PDF 仍可提取文字）")
 	}
 
-	ocrRow := container.NewHBox(ocrCheck, ocrHint)
+	modeRow := container.NewVBox(
+		container.NewHBox(screenshotCheck),
+		container.NewHBox(textCheck, textHint),
+	)
 
 	convertBtn = widget.NewButtonWithIcon("开始转换", theme.MediaPlayIcon(), func() {
-		if len(files) == 0 {
+		if len(files) == 0 || !hasOutputMode() {
 			return
 		}
 		converting = true
-		updateConvertBtn(convertBtn, len(files), converting)
-		ocrCheck.Disable()
+		updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
+		screenshotCheck.Disable()
+		textCheck.Disable()
 
 		progressBar.Show()
 		progressBar.SetValue(0)
 		outputLabel.SetText("")
+
+		wantScreenshot := screenshotCheck.Checked
+		wantText := textCheck.Checked
 
 		go func() {
 			var results []string
@@ -140,24 +165,32 @@ func main() {
 				})
 
 				baseProgress := float64(i) / float64(total)
-				// Always produce the screenshot version (兜底).
-				_, err := pdfconv.Convert(f.path, pdfconv.ModeImage, func(pct float64) {
-					overall := baseProgress + pct/float64(total)
-					fyne.Do(func() { progressBar.SetValue(overall) })
-				})
-				if err == nil && ocrCheck.Checked {
-					// Also produce a text version (auto-detect text layer or OCR).
-					pdfconv.Convert(f.path, pdfconv.ModeText, func(pct float64) {})
-				}
-				fyne.Do(func() {
-					if err != nil {
-						dialog.ShowError(fmt.Errorf("转换 %s 失败: %w", f.name, err), w)
-						results = append(results, fmt.Sprintf("[失败] %s", f.name))
-						progressBar.SetValue(float64(i+1) / float64(total))
-					} else {
-						results = append(results, "✓ "+truncateName(f.name, 30))
-						progressBar.SetValue(float64(i+1) / float64(total))
+
+				// Screenshot (image) mode — always works.
+				if wantScreenshot {
+					if _, err := pdfconv.Convert(f.path, pdfconv.ModeImage, func(pct float64) {
+						fyne.Do(func() { progressBar.SetValue(baseProgress + pct/float64(total)) })
+					}); err != nil {
+						fyne.Do(func() {
+							dialog.ShowError(fmt.Errorf("截图版转换 %s 失败: %w", f.name, err), w)
+						})
 					}
+				}
+
+				// Text mode — extract text, fall back to OCR for scans.
+				if wantText {
+					if _, err := pdfconv.Convert(f.path, pdfconv.ModeText, func(pct float64) {
+						fyne.Do(func() { progressBar.SetValue(baseProgress + pct/float64(total)) })
+					}); err != nil {
+						fyne.Do(func() {
+							dialog.ShowError(fmt.Errorf("文字版转换 %s 失败: %w", f.name, err), w)
+						})
+					}
+				}
+
+				fyne.Do(func() {
+					results = append(results, "✓ "+truncateName(f.name, 30))
+					progressBar.SetValue(float64(i+1) / float64(total))
 				})
 			}
 
@@ -173,10 +206,9 @@ func main() {
 				d.Show()
 
 				converting = false
-				updateConvertBtn(convertBtn, len(files), converting)
-				if modelsExist {
-					ocrCheck.Enable()
-				}
+				screenshotCheck.Enable()
+				textCheck.Enable()
+				updateConvertBtn(convertBtn, len(files), converting, hasOutputMode())
 			})
 		}()
 	})
@@ -186,11 +218,11 @@ func main() {
 		statusLabel,
 		progressBar,
 		outputLabel,
-		ocrRow,
+		modeRow,
 		convertBtn,
 	)
 
-	// --- layout ---
+	// ── layout ──────────────────────────────────────────────────────
 	content := container.NewBorder(
 		topBar,
 		convertBar,
@@ -204,7 +236,7 @@ func main() {
 	w.ShowAndRun()
 }
 
-func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, countLabel *widget.Label, convertBtn *widget.Button, converting bool) {
+func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, countLabel *widget.Label, convertBtn *widget.Button, converting bool, hasOutputMode func() bool) {
 	fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 		if err != nil {
 			dialog.ShowError(err, w)
@@ -232,7 +264,7 @@ func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, coun
 		fyne.Do(func() {
 			fileList.Refresh()
 			updateCountLabel(countLabel, len(*files))
-			updateConvertBtn(convertBtn, len(*files), converting)
+			updateConvertBtn(convertBtn, len(*files), converting, hasOutputMode())
 
 			// Scroll to bottom
 			fileList.ScrollToBottom()
@@ -267,10 +299,10 @@ func updateCountLabel(l *widget.Label, n int) {
 	l.SetText(fmt.Sprintf("已选文件: %d 个", n))
 }
 
-func updateConvertBtn(btn *widget.Button, n int, converting bool) {
+func updateConvertBtn(btn *widget.Button, n int, converting bool, hasMode bool) {
 	if converting {
 		btn.Disable()
-	} else if n == 0 {
+	} else if n == 0 || !hasMode {
 		btn.Disable()
 	} else {
 		btn.Enable()

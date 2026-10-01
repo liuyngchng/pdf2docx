@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
-# 脚本位于项目根目录，dist/ 在其下；直接切换到脚本自身所在目录
-cd "$(dirname "$0")"
+# 脚本位于 scripts/ 目录，dist/ 与 build/ 在其上级项目根目录下
+cd "$(dirname "$0")/.."
 export PATH=/ucrt64/bin:$PATH
 
 exe_file=dist/pdf2docx.exe

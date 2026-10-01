@@ -3,20 +3,20 @@ set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────
 # Build the headless HTTP server binary (Linux, with OCR).
-#   ./build_server.sh                 # build server binary + bundle deps
-#   ./build_server.sh --docker        # build a production Docker image
+#   ./scripts/build_server.sh                 # build server binary + bundle deps
+#   ./scripts/build_server.sh --docker        # build a production Docker image
 #
 # The server binary is dynamically linked and requires:
 #   - libopencv_core + libopencv_imgproc (from libopencv-dev)
 #   - libonnxruntime.so (vendored in build/deps/onnxruntime/lib/)
 # ────────────────────────────────────────────────────────────────
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ── Usage ───────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'
-用法: ./build_server.sh [参数...]
+用法: ./scripts/build_server.sh [参数...]
 
 参数说明:
   --docker           构建生产 Docker 镜像（推荐部署方式）
@@ -25,9 +25,9 @@ usage() {
   -h | --help        显示本帮助并退出
 
 示例:
-  ./build_server.sh                  # 构建二进制 + 依赖到 dist/
-  ./build_server.sh --docker         # 构建 Docker 镜像 pdf2docx-server:latest
-  ./build_server.sh --docker -x      # 详细日志 + Docker 镜像
+  ./scripts/build_server.sh                  # 构建二进制 + 依赖到 dist/
+  ./scripts/build_server.sh --docker         # 构建 Docker 镜像 pdf2docx-server:latest
+  ./scripts/build_server.sh --docker -x      # 详细日志 + Docker 镜像
 
 说明:
   Server 始终以 CGO 编译，集成 OCR 支持（PaddleOCR + MuPDF）。
@@ -75,10 +75,10 @@ echo "────────────────────────�
 echo ""
 
 # ── Build image must exist ──────────────────────────────────────
-IMAGE="pdf2docx_dev:latest"
+IMAGE="pdf2docx_build:latest"
 if ! docker image inspect "$IMAGE" &>/dev/null; then
-  echo "Building dev image $IMAGE ..."
-  docker build -t "$IMAGE" -f Dockerfile.dev .
+  echo "Building image $IMAGE ..."
+  docker build -t "$IMAGE" -f scripts/Dockerfile .
   echo "Done."
 fi
 
@@ -141,7 +141,7 @@ if $BUILD_DOCKER; then
 
   echo ""
   echo "=== Building Docker image pdf2docx-server:latest ==="
-  docker build -t pdf2docx-server:latest -f Dockerfile.server "$SCRIPT_DIR"
+  docker build -t pdf2docx-server:latest -f scripts/Dockerfile.server "$SCRIPT_DIR"
   echo ""
   echo "=== Docker image built ==="
   echo "  pdf2docx-server:latest"

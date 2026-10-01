@@ -4,11 +4,11 @@
 # This image only packages a PRE-BUILT binary from dist/ — it does NOT
 # compile. Build the binary first (inside Docker) then build the image:
 #
-#   ./build_server.sh --docker     # builds binary + image in one go
+#   ./scripts/build_server.sh --docker     # builds binary + image in one go
 #
 #   # or step by step:
-#   ./build_server.sh              # 1) build binary → dist/
-#   docker build -t pdf2docx-server -f Dockerfile.server .
+#   ./scripts/build_server.sh              # 1) build binary → dist/
+#   docker build -t pdf2docx-server -f scripts/Dockerfile.server .
 #   #                                 2) package dist/ into image
 #
 # Run:

@@ -28,26 +28,28 @@ OCR 版启动后，如果 GUI 检测到 `models/` 目录（含 `det/inference.on
 ### 前置条件
 
 - Docker（编译环境全部容器化，本机无需 Go）
-- Go 工具链 tarball：放到 `build/deps/go1.24.13.linux-amd64.tar.gz`（`build_cli.sh` 首次会自动下载）
+- Go 工具链 tarball：放到 `build/deps/go1.24.13.linux-amd64.tar.gz`（`scripts/build_cli.sh` 首次会自动下载）
 
 ### 一键编译
 
 ```bash
-# 基础版（无 OCR 依赖，静态链接）
-./build_cli.sh
-
-# OCR 版（需 libopencv-dev，动态链接 opencv）
-./build_cli.sh --with-ocr
+# 默认构建（Linux OCR 版 + Windows 交叉编译）
+./scripts/build_cli.sh
 ```
 
 产出 `dist/` 下：
 
 | 文件 | 平台 | 说明 |
 |------|------|------|
-| `pdf2docx` | Linux amd64 | GUI 桌面版 |
-| `pdf2docx.exe` | Windows amd64 | GUI 桌面版（交叉编译，不含 OCR） |
+| `pdf2docx` | Linux amd64 | GUI 桌面版（含 OCR 支持） |
+| `pdf2docx.exe` | Windows amd64 | GUI 桌面版（交叉编译，含 MuPDF 文本提取，无 OCR） |
 | `pdf2docx-server` | Linux amd64 | HTTP 服务端 |
-| `libonnxruntime.so` | Linux amd64 | OCR 版附带（`--with-ocr` 时产出） |
+| `libonnxruntime.so` | Linux amd64 | ONNX Runtime 运行时（OCR 版附带） |
+| `models/` | — | OCR 模型目录（OCR 版附带） |
+
+Linux 构建始终集成 OCR（OpenCV + ONNX Runtime），产出含 .so 库和 models/ 的完整包。
+Windows 交叉编译使用 `-tags noocr`（不支持 Windows OCR 交叉编译），但 MuPDF 文本提取始终可用，
+因此 Windows 版仍能生成文字版 `.text.docx`（仅扫描件需要 OCR 降级）。
 
 ### Windows OCR 版编译
 
@@ -66,7 +68,7 @@ pacman -Su
 然后**在 cmd 或 PowerShell 中**（不需要从 MSYS2 终端启动）运行：
 
 ```cmd
-build.bat
+scripts\build.bat
 ```
 
 产出 `dist\pdf2docx-windows-amd64-ocr.zip`，包含：
@@ -80,16 +82,16 @@ build.bat
 
 **最终用户不需要安装 MSYS2**，解压 zip 双击 `pdf2docx.exe` 即可使用 OCR 功能。
 
-构建默认使用 [garble](https://github.com/burrowers/garble) 对模块内代码做符号名和字符串字面量混淆（依赖不变）。如果不需要混淆：
+构建默认使用 [garble](https://github.com/burrowers/garble) 对 Windows 交叉编译的模块内代码做符号名和字符串字面量混淆（依赖不变）。Linux OCR 构建不使用 garble（CGO/OCR 与 garble 不兼容）。如果不需要混淆：
 
 ```bash
-./build_cli.sh --no-obfuscate
+./scripts/build_cli.sh --no-obfuscate
 ```
 
 通过代理访问外网：
 
 ```bash
-./build_cli.sh http_proxy=http://proxy:8080 https_proxy=http://proxy:8080
+./scripts/build_cli.sh http_proxy=http://proxy:8080 https_proxy=http://proxy:8080
 ```
 
 ### Server 编译
@@ -105,11 +107,11 @@ CGO_ENABLED=1 go build -o pdf2docx-cli ./cmd/cli/
 Server：
 
 ```bash
-# 静态版本（无 OCR）
-./build_server.sh
+# 构建服务端（始终带 OCR）
+./scripts/build_server.sh
 
-# 带 OCR
-./build_server.sh --with-ocr
+# 构建生产 Docker 镜像（推荐部署方式）
+./scripts/build_server.sh --docker
 ```
 
 ## 开发环境搭建
@@ -117,11 +119,11 @@ Server：
 开发容器基于 `ubuntu:24.04`，已预装 Go 1.24.13、gcc/g++、OpenCV 4.6、ONNX Runtime 头文件和库。
 
 ```bash
-# 首次：构建开发镜像（或直接用 ./build_cli.sh --with-ocr 自动构建）
-docker build -t pdf2docx_dev:latest -f Dockerfile.dev .
+# 首次：构建开发镜像
+docker build -t pdf2docx_build:latest -f scripts/Dockerfile .
 
 # 进入开发容器
-./dev.sh
+./scripts/dev.sh
 
 # 容器内可执行：
 go build ./internal/ocr/          # 编译 OCR 包
@@ -158,36 +160,39 @@ models/
 
 1. 运行 `./pdf2docx`（Linux）或 `pdf2docx.exe`（Windows）
 2. 弹出文件选择对话框，选一个或多个 PDF 文件
-3. （可选）勾选"生成 OCR 文字版"复选框
+3. 勾选输出类型（至少选一个，选择会自动记忆，下次打开无需重选）：
+   - **生成截图版 (.docx)** — 每页渲染为图片嵌入 Word
+   - **生成文字版 (.text.docx)** — 提取文字（有文字层的 PDF 直接提取；扫描件需 OCR，仅 Linux 版支持）
 4. 点击"开始转换"
-5. 同目录下生成 `.docx` 文件（或额外 `.ocr.docx` 文字版），用 Word / WPS 打开
+5. 同目录下生成对应的 `.docx` / `.text.docx` 文件，用 Word / WPS 打开
 
 ### CLI
 
 ```bash
-# 基础转换
+# 基础转换（截图版）
 ./pdf2docx-cli input.pdf
 
-# 带 OCR
-./pdf2docx-cli --ocr input.pdf
+# 文字版
+./pdf2docx-cli --mode text input.pdf
 ```
 
 ### Server
+
+Server 提供两个独立的转换接口：
 
 ```bash
 # 启动服务
 PORT=8080 ./pdf2docx-server
 
-# 基础转换
-curl -X POST http://localhost:8080/convert \
+# 截图版 DOCX
+curl -X POST http://localhost:8080/convert/image \
   -F "file=@input.pdf" \
   -o output.docx
 
-# 带 OCR 文字版
-curl -X POST http://localhost:8080/convert \
+# 文字版 DOCX
+curl -X POST http://localhost:8080/convert/text \
   -F "file=@input.pdf" \
-  -F "ocr=true" \
-  -o output.docx
+  -o output.text.docx
 ```
 
 ## 编译原理
@@ -195,15 +200,15 @@ curl -X POST http://localhost:8080/convert \
 ```
 ubuntu:24.04
   └─ 安装 gcc + g++ + MinGW-w64 + X11/GL/Wayland 开发头文件
-       + libopencv-dev + Go toolchain
+       + libopencv-dev + patchelf + Go toolchain
        └─ go mod download（模块缓存，挂载外部 volume 复用）
-            ├─ CGO_ENABLED=1 GOOS=linux   → pdf2docx（ELF）
+            ├─ CGO_ENABLED=1 GOOS=linux   → pdf2docx（ELF，含 OCR）
             │     └─ 链接 libopencv_core + libopencv_imgproc + libonnxruntime
             └─ CGO_ENABLED=1 GOOS=windows
                CC=x86_64-w64-mingw32-gcc  → pdf2docx.exe（PE32+）
-               （Windows 版使用 -tags noocr，不含 OCR）
+               （Windows 版使用 -tags noocr，无 OCR，但含 MuPDF 文本提取）
 
-Windows OCR 版需在 Windows 上通过 build.bat 使用 MSYS2 MinGW-w64 原生编译：
+Windows OCR 版需在 Windows 上通过 scripts/build.bat 使用 MSYS2 MinGW-w64 原生编译：
   MSYS2 UCRT64 (Windows)
     ├─ pacman 安装 mingw-w64-ucrt-x86_64-go/gcc/opencv
     ├─ 下载 onnxruntime Windows 预编译包 → gendef + dlltool 生成 MinGW 导入库
@@ -219,12 +224,14 @@ MuPDF 静态库由 go-fitz 内置提供（libmupdf_linux_amd64.a / libmupdf_wind
 ```
 pdf2docx/
 ├── main.go                     # Fyne GUI 入口
-├── Dockerfile                  # 基础编译镜像（ubuntu:24.04）
-├── Dockerfile.dev              # 开发编译镜像（基础 + libopencv-dev）
-├── dev.sh                      # 启动开发容器
-├── build_cli.sh                # GUI 一键编译（Docker 容器化，Linux + Windows 交叉编译）
-├── build.bat                   # Windows OCR 版编译（MSYS2 MinGW-w64 原生编译）
-├── build_server.sh             # Server 一键编译
+├── scripts/
+│   ├── Dockerfile              # 编译镜像（ubuntu:24.04 + Go + OpenCV + ONNX Runtime）
+│   ├── Dockerfile.server       # Server 生产镜像
+│   ├── dev.sh                  # 启动开发容器
+│   ├── build_cli.sh            # GUI 一键编译（Docker 容器化，Linux OCR + Windows 交叉编译）
+│   ├── build.bat               # Windows OCR 版编译（MSYS2 MinGW-w64 原生编译）
+│   ├── build_server.sh         # Server 一键编译
+│   └── collect_dlls.sh         # Windows DLL 收集（被 build.bat 调用）
 ├── go.mod / go.sum
 ├── cmd/
 │   ├── cli/main.go             # 纯 Go 命令行版本
