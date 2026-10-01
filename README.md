@@ -43,9 +43,10 @@ OCR 版启动后，如果 GUI 检测到 `models/` 目录（含 `det/inference.on
 |------|------|------|
 | `pdf2docx` | Linux amd64 | GUI 桌面版（含 OCR 支持） |
 | `pdf2docx.exe` | Windows amd64 | GUI 桌面版（交叉编译，含 MuPDF 文本提取，无 OCR） |
-| `pdf2docx-server` | Linux amd64 | HTTP 服务端 |
 | `libonnxruntime.so` | Linux amd64 | ONNX Runtime 运行时（OCR 版附带） |
 | `models/` | — | OCR 模型目录（OCR 版附带） |
+
+Server 版通过 `./scripts/build_server.sh` 构建生产 Docker 镜像 `pdf2docx-server:latest`。
 
 Linux 构建始终集成 OCR（OpenCV + ONNX Runtime），产出含 .so 库和 models/ 的完整包。
 Windows 交叉编译使用 `-tags noocr`（不支持 Windows OCR 交叉编译），但 MuPDF 文本提取始终可用，
@@ -107,11 +108,8 @@ CGO_ENABLED=1 go build -o pdf2docx-cli ./cmd/cli/
 Server：
 
 ```bash
-# 构建服务端（始终带 OCR）
+# 构建生产 Docker 镜像（始终带 OCR）
 ./scripts/build_server.sh
-
-# 构建生产 Docker 镜像（推荐部署方式）
-./scripts/build_server.sh --docker
 ```
 
 ## 开发环境搭建
@@ -267,11 +265,15 @@ pdf2docx/
 
 ## 部署
 
-### 基础版（静态，无外部依赖）
+### GUI
 
-直接将 `dist/pdf2docx` 或 `dist/pdf2docx-server` 放到目标 Linux 机器运行即可。
+直接将 `dist/` 下的 tar 包解压到目标 Linux 机器即可运行：
 
-### OCR 版
+```bash
+tar -xf pdf2docx-linux-amd64.tar
+cd pdf2docx-linux-amd64/
+./pdf2docx
+```
 
 目标机器需要：
 
@@ -279,21 +281,18 @@ pdf2docx/
    ```bash
    sudo apt-get install -y libopencv-core406 libopencv-imgproc406
    ```
-   或直接安装完整 opencv（`libopencv-dev` 也装的话会有头文件但不影响运行）。
 
-2. **ONNX Runtime**：将 `dist/libonnxruntime.so` 放到可执行文件同目录下（二进制已设置 `$ORIGIN` rpath，自动查找）。
+2. **ONNX Runtime**：已内置在 tar 包中（`libonnxruntime.so`），二进制已设置 `$ORIGIN` rpath，自动查找。
 
-3. **OCR 模型**：将 `models/` 目录放到可执行文件同目录下。
-   ```
-   部署目录/
-   ├── pdf2docx              # GUI 或 pdf2docx-server
-   ├── libonnxruntime.so     # ONNX Runtime 动态库
-   └── models/
-       ├── det/inference.onnx
-       └── rec/
-           ├── inference.onnx
-           └── inference.yml
-   ```
+3. **OCR 模型**：已内置在 tar 包中（`models/`）。
+
+### Server
+
+直接运行 Docker 镜像：
+
+```bash
+docker run -p 8080:8080 pdf2docx-server:latest
+```
 
 ## License
 

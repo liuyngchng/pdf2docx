@@ -2,7 +2,12 @@
 
 ## 概述
 
-HTTP 服务，接收 PDF 文件，返回转换后的 DOCX 文件。
+HTTP 服务，接收 PDF 文件，返回转换后的 DOCX 文件。提供两种转换模式：
+
+| 端点 | 模式 | 产出 | 说明 |
+|------|------|------|------|
+| `/convert/image` | 截图版 | `.docx` | 每页渲染为图片嵌入 Word，始终可用 |
+| `/convert/text` | 文字版 | `.text.docx` | 提取文字（有文字层的 PDF 直接提取，扫描件 OCR），需要 OCR 模型 |
 
 ---
 
@@ -25,12 +30,14 @@ Content-Type: application/json
 
 ---
 
-### 2. PDF 转 DOCX
+### 2. 截图版转换
 
 ```
-POST /convert
+POST /convert/image
 Content-Type: multipart/form-data
 ```
+
+每页渲染为 JPEG 图片嵌入 DOCX，适合所有 PDF（包括纯扫描件）。
 
 **请求**
 
@@ -48,7 +55,36 @@ Content-Disposition: attachment; filename="xxx.docx"
 <DOCX 二进制流>
 ```
 
-**错误响应**
+---
+
+### 3. 文字版转换
+
+```
+POST /convert/text
+Content-Type: multipart/form-data
+```
+
+优先使用 MuPDF 提取 PDF 内嵌文字层；对纯扫描件（无文字层）回退到 OCR 识别。
+
+**请求**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 要转换的 PDF 文件，最大 64 MB |
+
+**成功响应**
+
+```
+200 OK
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Content-Disposition: attachment; filename="xxx.text.docx"
+
+<DOCX 二进制流>
+```
+
+---
+
+### 错误响应
 
 | 状态码 | 说明 |
 |--------|------|
@@ -70,68 +106,42 @@ Content-Disposition: attachment; filename="xxx.docx"
 ### 健康检查
 
 ```bash
-# 简单检查
-curl -s http://localhost:8080/health
-
-# 只看 HTTP 状态码
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/health
+curl -s --noproxy "*" http://localhost:8080/health
 ```
 
-### 转换 PDF
+### 截图版转换
 
 ```bash
-# 基本转换
-curl -X POST http://localhost:8080/convert \
+curl -X POST --noproxy "*" http://localhost:8080/convert/image \
   -F "file=@input.pdf" \
   -o output.docx
+```
 
-# 显示上传进度
-curl -X POST http://localhost:8080/convert \
+### 文字版转换
+
+```bash
+curl -X POST --noproxy "*" http://localhost:8080/convert/text \
+  -F "file=@input.pdf" \
+  -o output.text.docx
+```
+
+
+
+### 显示上传进度
+
+```bash
+curl -X POST http://localhost:8080/convert/image \
   -F "file=@input.pdf" \
   -o output.docx \
   --progress-bar
-
-# 显示请求/响应头
-curl -X POST http://localhost:8080/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  -v
-
-# 忽略自签名证书（HTTPS 场景）
-curl -X POST https://your-server:8443/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  --insecure
-
-# 强制不走代理（直连内网服务器）
-curl -X POST http://localhost:8080/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  --noproxy "*"
-
-# 只对 localhost 不走代理
-curl -X POST http://localhost:8080/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  --noproxy "localhost,127.0.0.1"
-
-# 重试（网络不稳定时）
-curl -X POST http://localhost:8080/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  --retry 3 --retry-delay 5
 ```
+
+
 
 ### 验证结果
 
 ```bash
-# 检查返回的是否为有效的 DOCX 文件
-curl -s -X POST http://localhost:8080/convert \
-  -F "file=@input.pdf" \
-  -o output.docx \
-  -w "\nHTTP %{http_code}, size %{size_download} bytes, took %{time_total}s\n"
-
-# 确认文件头（DOCX 本质是 ZIP）
+# 检查返回的文件类型（DOCX 本质是 ZIP）
 file output.docx
 # 输出: output.docx: Microsoft Word 2007+
 ```
