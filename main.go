@@ -91,8 +91,15 @@ func main() {
 	countLabel = widget.NewLabel("已选文件: 0 个")
 	updateCountLabel(countLabel, 0)
 
+	// status / output labels — defined early because addBtn / clearBtn closures reference them.
+	statusLabel := widget.NewLabel("请添加 PDF 文件")
+	statusLabel.Alignment = fyne.TextAlignCenter
+
+	outputLabel := widget.NewLabel("")
+	outputLabel.Wrapping = fyne.TextWrapBreak
+
 	addBtn := widget.NewButtonWithIcon("添加 PDF 文件", theme.FileIcon(), func() {
-		showFilePicker(w, &files, fileList, countLabel, convertBtn, converting, hasOutputMode)
+		showFilePicker(w, &files, fileList, countLabel, convertBtn, converting, hasOutputMode, statusLabel, outputLabel)
 	})
 
 	clearBtn := widget.NewButtonWithIcon("清空列表", theme.DeleteIcon(), func() {
@@ -100,19 +107,16 @@ func main() {
 		fileList.Refresh()
 		updateCountLabel(countLabel, 0)
 		updateConvertBtn(convertBtn, 0, converting, hasOutputMode())
+		statusLabel.SetText("请添加 PDF 文件")
+		outputLabel.SetText("")
+		w.SetTitle("PDF2Word - PDF转Word工具")
 	})
 
 	topBar := container.NewBorder(nil, nil, addBtn, clearBtn, countLabel)
 
 	// ── bottom ──────────────────────────────────────────────────────
-	statusLabel := widget.NewLabel("请添加 PDF 文件")
-	statusLabel.Alignment = fyne.TextAlignCenter
-
 	progressBar := widget.NewProgressBar()
 	progressBar.Hide()
-
-	outputLabel := widget.NewLabel("")
-	outputLabel.Wrapping = fyne.TextWrapBreak
 
 	// ── Output mode checkboxes ──────────────────────────────────────
 	screenshotCheck = widget.NewCheck("生成截图版 (.docx)", func(enabled bool) {
@@ -239,7 +243,7 @@ func main() {
 	w.ShowAndRun()
 }
 
-func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, countLabel *widget.Label, convertBtn *widget.Button, converting bool, hasOutputMode func() bool) {
+func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, countLabel *widget.Label, convertBtn *widget.Button, converting bool, hasOutputMode func() bool, statusLabel *widget.Label, outputLabel *widget.Label) {
 	fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 		if err != nil {
 			dialog.ShowError(err, w)
@@ -268,6 +272,9 @@ func showFilePicker(w fyne.Window, files *[]pdfFile, fileList *widget.List, coun
 			fileList.Refresh()
 			updateCountLabel(countLabel, len(*files))
 			updateConvertBtn(convertBtn, len(*files), converting, hasOutputMode())
+			// 新加文件时清除之前的转换结果
+			statusLabel.SetText("请点击「开始转换」")
+			outputLabel.SetText("")
 
 			// Scroll to bottom
 			fileList.ScrollToBottom()
