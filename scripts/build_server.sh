@@ -63,6 +63,9 @@ GOCACHE_DIR="$SCRIPT_DIR/build/gocache_dev"
 GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
 mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
 
+# ── ONNX Runtime SDK (download if missing; uses proxy env) ───────
+"$SCRIPT_DIR/scripts/ensure_onnxruntime.sh"
+
 ONNXRT_LIB="$SCRIPT_DIR/build/deps/onnxruntime"
 
 # ── 1. Build binary in build container ─────────────────────────

@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 IMAGE="pdf2docx_build:latest"
 
+# ── ONNX Runtime SDK (download if missing; uses proxy env) ───────
+"$SCRIPT_DIR/scripts/ensure_onnxruntime.sh"
+
 # Build dev image if not present
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building dev image $IMAGE ..."

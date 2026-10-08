@@ -110,6 +110,11 @@ GOCACHE_DIR="$SCRIPT_DIR/build/gocache"
 GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
 mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
 
+# ── ONNX Runtime SDK (download if missing; uses proxy env) ───────
+"$SCRIPT_DIR/scripts/ensure_onnxruntime.sh" \
+  ${HTTP_PROXY_VAL:+"http_proxy=$HTTP_PROXY_VAL"} \
+  ${HTTPS_PROXY_VAL:+"https_proxy=$HTTPS_PROXY_VAL"}
+
 # ── Go toolchain tarball (download if missing) ───────────────────
 GO_VERSION="1.24.13"
 GO_TARBALL="$SCRIPT_DIR/build/deps/go${GO_VERSION}.linux-amd64.tar.gz"
