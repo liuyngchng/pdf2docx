@@ -70,6 +70,9 @@ pacman -Su
 
 ```cmd
 scripts\build.bat
+
+# 如果连网需要代理， 则执行如下命令,例如 scripts\build.bat --proxy http://123.456.789:8080
+scripts\build.bat --proxy http://your_proxoy_host:your_proxy_port
 ```
 
 产出 `dist\pdf2docx-windows-amd64-ocr.zip`，包含：

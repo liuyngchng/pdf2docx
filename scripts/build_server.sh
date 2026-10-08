@@ -95,9 +95,9 @@ docker run --rm \
 echo "  dist/pdf2docx-server ($(du -h "$SCRIPT_DIR/dist/pdf2docx-server" | cut -f1))"
 
 # ── 2. Bundle deps + package Docker image ───────────────────────
-rm -rf "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
+rm -rf "$SCRIPT_DIR"/dist/libonnxruntime.so* "$SCRIPT_DIR/dist/models"
 
-cp "$ONNXRT_LIB/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
+cp -a "$ONNXRT_LIB/lib/libonnxruntime.so"* "$SCRIPT_DIR/dist/"
 cp -r "$SCRIPT_DIR/models" "$SCRIPT_DIR/dist/models"
 
 echo ""
@@ -105,7 +105,7 @@ echo "=== Step 2/2: Building Docker image pdf2docx-server:latest ==="
 docker build -t pdf2docx-server:latest -f scripts/Dockerfile.server "$SCRIPT_DIR"
 
 # Clean up intermediate files from dist/.
-rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR/dist/libonnxruntime.so" "$SCRIPT_DIR/dist/models"
+rm -rf "$SCRIPT_DIR/dist/pdf2docx-server" "$SCRIPT_DIR"/dist/libonnxruntime.so* "$SCRIPT_DIR/dist/models"
 
 echo ""
 echo "=== Done ==="

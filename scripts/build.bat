@@ -15,11 +15,58 @@ setlocal enabledelayedexpansion
 ::
 :: This script can be run directly in cmd or PowerShell,
 :: MSYS2 terminal not needed.
+::
+:: Usage:
+::   build.bat                            direct connection (no proxy)
+::   build.bat --proxy http://host:port   use a network proxy
+::   build.bat -p http://host:port        short form
+::
+:: The proxy is injected into pacman, PowerShell download, and Go,
+:: which are the only places this script touches the network.
+:: Note: the proxy value must not contain spaces or & characters.
 :: ================================================================
 
 set "SCRIPT_DIR=%~dp0"
 set "ROOT_DIR=%SCRIPT_DIR%..\"
 cd /d "%ROOT_DIR%"
+
+:: --- Parse command-line arguments ---
+set "PROXY="
+:parse_args
+if "%~1"=="" goto :args_done
+if /i "%~1"=="--proxy" (
+    set "PROXY=%~2"
+    shift
+    shift
+    goto :parse_args
+)
+if /i "%~1"=="-p" (
+    set "PROXY=%~2"
+    shift
+    shift
+    goto :parse_args
+)
+echo [WARNING] Unknown argument ignored: %~1
+shift
+goto :parse_args
+:args_done
+
+:: Show proxy status so the user knows how to use the option
+if "%PROXY%"=="" (
+    echo [INFO] No proxy specified. If your network requires a proxy,
+    echo        rerun with:  build.bat --proxy http://host:port
+    echo        Example:     build.bat --proxy http://127.0.0.1:7890
+    echo.
+    set "BASH_PROXY="
+    set "PS_PROXY_ARGS="
+) else (
+    echo [INFO] Using proxy: %PROXY%
+    echo.
+    :: prefix injected into every bash command that needs the network
+    set "BASH_PROXY=export http_proxy='%PROXY%' https_proxy='%PROXY%' HTTP_PROXY='%PROXY%' HTTPS_PROXY='%PROXY%' && "
+    :: arguments injected into the PowerShell Invoke-WebRequest call
+    set "PS_PROXY_ARGS=-Proxy '%PROXY%'"
+)
 
 :: --- Locate MSYS2 ---
 set "MSYS2="
@@ -51,14 +98,14 @@ echo === Step 1: Check/install MSYS2 packages ===
 echo.
 
 :: First update pacman database (to avoid keyring issues)
-"%BASH%" -lc "pacman -Sy --noconfirm 2>/dev/null || true"
+"%BASH%" -lc "%BASH_PROXY%pacman -Sy --noconfirm 2>/dev/null || true"
 
 :: Install UCRT64 build toolchain + OpenCV
 :: --needed skips already-installed packages
 set "PKGS=mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-opencv mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-tools-git"
 
 echo   Installing: %PKGS%
-"%BASH%" -lc "pacman -S --needed --noconfirm %PKGS%"
+"%BASH%" -lc "%BASH_PROXY%pacman -S --needed --noconfirm %PKGS%"
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] pacman install failed.
     echo Please manually run in "MSYS2 UCRT64" terminal:
@@ -101,16 +148,31 @@ if exist "%ORT_DIR%\include\onnxruntime_c_api.h" (
 set "ORT_ZIP=%ROOT_DIR%build\deps\onnxruntime-win-x64-%ORT_VER%.zip"
 set "ORT_URL=https://github.com/microsoft/onnxruntime/releases/download/v%ORT_VER%/onnxruntime-win-x64-%ORT_VER%.zip"
 
+:: Clear leftovers from any previous failed run (empty include/, fake .a, etc.)
+rmdir /S /Q "%ORT_DIR%" 2>nul
+
 if not exist "%ORT_ZIP%" (
     echo   Downloading onnxruntime %ORT_VER% ...
-    powershell -Command "& { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%ORT_URL%' -OutFile '%ORT_ZIP%'; }"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Download failed: %ORT_URL%
-        echo Please manually download and extract to: %ORT_DIR%
-        exit /b 1
-    )
-    echo [OK] Downloaded.
+    powershell -Command "& { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%ORT_URL%' -OutFile '%ORT_ZIP%' %PS_PROXY_ARGS%; }"
 )
+
+:: Verify the archive exists and is non-empty. A failed Invoke-WebRequest can
+:: leave nothing or a 0-byte file, so check the file size instead of %ERRORLEVEL%
+:: (which is unreliable inside an if (...) block).
+set "ORT_ZIP_OK="
+if exist "%ORT_ZIP%" (
+    for %%A in ("%ORT_ZIP%") do if %%~zA gtr 0 set "ORT_ZIP_OK=1"
+)
+if not defined ORT_ZIP_OK (
+    echo [ERROR] onnxruntime download failed or produced an empty file.
+    echo   URL: %ORT_URL%
+    echo   If your network requires a proxy, rerun with:
+    echo     build.bat --proxy http://host:port
+    echo   Or manually download the zip and place it at:
+    echo     %ORT_ZIP%
+    exit /b 1
+)
+echo [OK] Archive ready: %ORT_ZIP%
 
 echo   Extracting ...
 mkdir "%ORT_DIR%" 2>nul
@@ -142,6 +204,22 @@ if not exist "%ORT_DIR%\bin\onnxruntime.dll" (
 :: Clean up temp directory
 rmdir /S /Q "%ROOT_DIR%build\deps\onnxruntime\win-x64-tmp" 2>nul
 
+:: ── Final sanity check: the three required files must exist ──
+set "ORT_MISSING="
+if not exist "%ORT_DIR%\include\onnxruntime_c_api.h" set "ORT_MISSING=1"
+if not exist "%ORT_DIR%\lib\onnxruntime.lib"         set "ORT_MISSING=1"
+if not exist "%ORT_DIR%\bin\onnxruntime.dll"         set "ORT_MISSING=1"
+if defined ORT_MISSING (
+    echo [ERROR] onnxruntime files are incomplete after extraction.
+    echo   Expected files not found in %ORT_DIR%:
+    echo     include\onnxruntime_c_api.h
+    echo     lib\onnxruntime.lib
+    echo     bin\onnxruntime.dll
+    echo   Please check the zip archive at:
+    echo     %ORT_ZIP%
+    exit /b 1
+)
+
 :: --- Use gendef + dlltool to generate MinGW-compatible import library ---
 :: MSVC .lib cannot be linked by MinGW, need to generate .def from DLL then .a
 echo   Generating MinGW import library ...
@@ -162,7 +240,7 @@ echo === Step 3: Build pdf2docx.exe (Windows OCR) ===
 
 mkdir dist 2>nul
 
-"%BASH%" -lc "cd $(cygpath '%ROOT_DIR%') && export PATH=/ucrt64/bin:\$PATH && export GOROOT=/ucrt64/lib/go && export CGO_ENABLED=1 && export GOOS=windows && export GOARCH=amd64 && export GOPROXY=https://goproxy.cn,direct && export CGO_CXXFLAGS='-std=c++17' && echo '  Building...' && go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && echo '  Build OK.'"
+"%BASH%" -lc "cd $(cygpath '%ROOT_DIR%') && export PATH=/ucrt64/bin:\$PATH && %BASH_PROXY%export GOROOT=/ucrt64/lib/go && export CGO_ENABLED=1 && export GOOS=windows && export GOARCH=amd64 && export GOPROXY=https://goproxy.cn,direct && export CGO_CXXFLAGS='-std=c++17' && echo '  Building...' && go build -mod=mod -ldflags='-s -w -H windowsgui' -o dist/pdf2docx.exe . && echo '  Build OK.'"
 
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.

@@ -28,7 +28,7 @@ WORKDIR /app
 
 # Pre-built binary + ONNX Runtime shared lib + OCR models.
 COPY dist/pdf2docx-server /app/pdf2docx-server
-COPY dist/libonnxruntime.so /app/libonnxruntime.so
+COPY dist/libonnxruntime.so* /app/
 COPY dist/models /app/models
 
 ENV PORT=8080

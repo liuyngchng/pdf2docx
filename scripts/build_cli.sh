@@ -187,9 +187,9 @@ docker run --rm \
   "
 
 # ── Bundle OCR runtime deps ──────────────────────────────────────
-# Copy onnxruntime from vendored deps.
-cp "$SCRIPT_DIR/build/deps/onnxruntime/lib/libonnxruntime.so" "$SCRIPT_DIR/dist/libonnxruntime.so"
-echo "  bundled:  dist/libonnxruntime.so"
+# Copy onnxruntime from vendored deps (preserve soname symlinks).
+cp -a "$SCRIPT_DIR/build/deps/onnxruntime/lib/libonnxruntime.so"* "$SCRIPT_DIR/dist/"
+echo "  bundled:  dist/libonnxruntime.so*"
 
 # Copy OpenCV shared libs + patchelf rpath from the build image.
 docker run --rm -v "$SCRIPT_DIR":/workspace -w /workspace \
@@ -247,18 +247,26 @@ ARCHIVE_WIN="pdf2docx-windows-amd64.tar"
 rm -f "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" "$SCRIPT_DIR/dist/$ARCHIVE_WIN"
 
 # Linux: always bundle .so + models (OCR version).
-cd "$SCRIPT_DIR/dist"
-tar -cf "$ARCHIVE_LINUX" --transform='s,^,pdf2docx-linux-amd64/,' \
-  pdf2docx \
-  libonnxruntime.so \
-  libopencv_imgproc.so.406 libopencv_core.so.406 libtbb.so.12 \
-  models/
-cd "$SCRIPT_DIR"
+# Stage files into a directory first (tar --transform would also rewrite
+# symlink targets, breaking libonnxruntime.so -> .so.1 -> .so.1.27.1).
+STAGE_DIR="$SCRIPT_DIR/dist/pdf2docx-linux-amd64"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
+cp -a \
+  "$SCRIPT_DIR/dist/pdf2docx" \
+  "$SCRIPT_DIR"/dist/libonnxruntime.so* \
+  "$SCRIPT_DIR/dist/libopencv_imgproc.so.406" \
+  "$SCRIPT_DIR/dist/libopencv_core.so.406" \
+  "$SCRIPT_DIR/dist/libtbb.so.12" \
+  "$SCRIPT_DIR/dist/models" \
+  "$STAGE_DIR/"
+tar -cf "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" -C "$SCRIPT_DIR/dist" pdf2docx-linux-amd64
+rm -rf "$STAGE_DIR"
 echo "  $ARCHIVE_LINUX  ($(du -h "$SCRIPT_DIR/dist/$ARCHIVE_LINUX" | cut -f1)) — Linux OCR 完整包"
 
 rm -rf \
   "$SCRIPT_DIR/dist/pdf2docx" \
-  "$SCRIPT_DIR/dist/libonnxruntime.so" \
+  "$SCRIPT_DIR"/dist/libonnxruntime.so* \
   "$SCRIPT_DIR/dist/libopencv_imgproc.so.406" "$SCRIPT_DIR/dist/libopencv_core.so.406" \
   "$SCRIPT_DIR/dist/libtbb.so.12" \
   "$SCRIPT_DIR/dist/models"

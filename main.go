@@ -25,6 +25,14 @@ type pdfFile struct {
 }
 
 func main() {
+	// 单实例锁——避免多个实例同时读写 preferences.json 导致 EOF 报错。
+	unlock, err := acquireSingleInstanceLock()
+	if err != nil {
+		fyne.LogError("单实例锁获取失败", err)
+		os.Exit(1)
+	}
+	defer unlock()
+
 	// 强制使用中文界面
 	os.Setenv("LANG", "zh_CN.UTF-8")
 	os.Setenv("LC_ALL", "zh_CN.UTF-8")
@@ -218,7 +226,7 @@ func main() {
 
 	// 恢复用户上次的选择（必须在 convertBtn 创建后调用，否则回调里
 	// updateConvertBtn 会拿到 nil 的 convertBtn）。
-	screenshotCheck.SetChecked(prefs.BoolWithFallback("screenshotMode", true))
+	screenshotCheck.SetChecked(prefs.BoolWithFallback("screenshotMode", false))
 	textCheck.SetChecked(prefs.BoolWithFallback("textMode", true))
 
 	convertBar := container.NewVBox(
