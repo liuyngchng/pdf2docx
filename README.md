@@ -48,6 +48,8 @@ OCR 版启动后，如果 GUI 检测到 `models/` 目录（含 `det/inference.on
 
 Server 版通过 `./scripts/build_server.sh` 构建生产 Docker 镜像 `pdf2docx-server:latest`。
 
+MCP Server 版通过 `./scripts/build_mcp.sh` 构建生产 Docker 镜像 `pdf2docx-mcp:latest`。
+
 Linux 构建始终集成 OCR（OpenCV + ONNX Runtime），产出含 .so 库和 models/ 的完整包。
 Windows 交叉编译使用 `-tags noocr`（不支持 Windows OCR 交叉编译），但 MuPDF 文本提取始终可用，
 因此 Windows 版仍能生成文字版 `.text.docx`（仅扫描件需要 OCR 降级）。
@@ -113,6 +115,9 @@ Server：
 ```bash
 # 构建生产 Docker 镜像（始终带 OCR）
 ./scripts/build_server.sh
+
+# 构建 MCP Server Docker 镜像（始终带 OCR）
+./scripts/build_mcp.sh
 ```
 
 ## 开发环境搭建
@@ -196,6 +201,48 @@ curl -X POST http://localhost:8080/convert/text \
   -o output.text.docx
 ```
 
+### MCP Server
+
+MCP Server 通过 stdio 的 JSON-RPC 2.0 协议暴露 PDF→DOCX 转换能力，可被
+Claude Desktop、Cline 等 MCP 客户端直接调用（让 LLM 直接转换 PDF）。
+
+暴露两个工具：
+
+| 工具 | 说明 |
+|------|------|
+| `convert_pdf_to_docx_image` | PDF → 截图版 DOCX（每页渲染为图片嵌入 Word） |
+| `convert_pdf_to_docx_text` | PDF → 文字版 DOCX（有文字层直接提取，扫描件 OCR） |
+
+每个工具支持两种输入/输出方式（二选一）：
+
+- **输入**：`file_path`（本地路径，要求与客户端共享文件系统）或 `file_data`（base64 编码的 PDF）
+- **输出**：`output_path`（写到指定本地路径）或 `file_data`（base64 编码返回，默认）
+
+注册到 Claude Desktop（`claude_desktop_config.json`）：
+
+```json
+{
+  "mcpServers": {
+    "pdf2docx": {
+      "command": "/path/to/pdf2docx-mcp"
+    }
+  }
+}
+```
+
+或通过 Docker：
+
+```json
+{
+  "mcpServers": {
+    "pdf2docx": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "pdf2docx-mcp:latest"]
+    }
+  }
+}
+```
+
 ## 编译原理
 
 ```
@@ -228,15 +275,18 @@ pdf2docx/
 ├── scripts/
 │   ├── Dockerfile              # 编译镜像（ubuntu:24.04 + Go + OpenCV + ONNX Runtime）
 │   ├── Dockerfile.server       # Server 生产镜像
+│   ├── Dockerfile.mcp          # MCP Server 生产镜像
 │   ├── dev.sh                  # 启动开发容器
 │   ├── build_cli.sh            # GUI 一键编译（Docker 容器化，Linux OCR + Windows 交叉编译）
 │   ├── build.bat               # Windows OCR 版编译（MSYS2 MinGW-w64 原生编译）
 │   ├── build_server.sh         # Server 一键编译
+│   ├── build_mcp.sh            # MCP Server 一键编译
 │   └── collect_dlls.sh         # Windows DLL 收集（被 build.bat 调用）
 ├── go.mod / go.sum
 ├── cmd/
 │   ├── cli/main.go             # 纯 Go 命令行版本
-│   └── server/main.go          # HTTP 服务端
+│   ├── server/main.go          # HTTP 服务端
+│   └── mcp/main.go             # MCP 服务端（stdio JSON-RPC）
 ├── internal/
 │   ├── pdfconv/
 │   │   ├── convert.go          # PDF → 图片 → docx 主流程（含 OCR 集成）
@@ -296,6 +346,43 @@ cd pdf2docx-linux-amd64/
 ```bash
 docker run -p 8080:8080 pdf2docx-server:latest
 ```
+
+### MCP Server
+
+MCP Server 通过 stdio 通信，作为子进程被 MCP 客户端拉起，无需监听端口。
+
+两种部署方式：
+
+1. **直接运行二进制**（客户端与 MCP Server 共享文件系统，可用 `file_path` 传入 PDF）：
+
+   ```json
+   {
+     "mcpServers": {
+       "pdf2docx": {
+         "command": "/path/to/pdf2docx-mcp"
+       }
+     }
+   }
+   ```
+
+2. **通过 Docker 运行**（注意：`-i` 必须保留以维持 stdin，且需 `-v` 挂载目录才能用 `file_path`；否则只能用 `file_data` base64 方式）：
+
+   ```json
+   {
+     "mcpServers": {
+       "pdf2docx": {
+         "command": "docker",
+         "args": ["run", "-i", "--rm", "-v", "/tmp:/tmp", "pdf2docx-mcp:latest"]
+       }
+     }
+   }
+   ```
+
+环境变量：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LOG_LEVEL` | `info` | 日志级别：`debug` / `info` / `warn` / `error`（日志写 stderr，不影响 stdout 上的 JSON-RPC） |
 
 ## License
 
